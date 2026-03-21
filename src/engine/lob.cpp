@@ -1,4 +1,3 @@
-// src/engine/lob.cpp
 #include "engine/lob.hpp"
 #include <cmath>
 #include <algorithm>
@@ -7,6 +6,38 @@ LimitOrderBook::LimitOrderBook(const std::string& sym) {
     symbol = sym;
     position_limit = get_position_limit(sym);
     result.symbol = sym;
+    calibrate_for_product();
+}
+
+void LimitOrderBook::init_rng() {
+    if (!rng_initialized) {
+        std::hash<std::string> hasher;
+        rng.seed(hasher(symbol) ^ 42);
+        rng_initialized = true;
+    }
+}
+
+void LimitOrderBook::calibrate_for_product() {
+    // Averaged across 5 real Prosperity 4 submissions:
+    //   EMERALDS: ~10 buys + ~16 sells per 2000 ticks, size 3-8
+    //   TOMATOES: ~35 buys + ~32 sells per 2000 ticks, size 2-5
+    if (symbol == "EMERALDS") {
+        passive_fill_prob_buy = 10.0 / 2000.0;   // 0.005
+        passive_fill_prob_sell = 16.0 / 2000.0;   // 0.008
+        min_fill_size = 3;
+        max_fill_size = 8;
+    } else if (symbol == "TOMATOES") {
+        passive_fill_prob_buy = 35.0 / 2000.0;    // 0.0175
+        passive_fill_prob_sell = 32.0 / 2000.0;    // 0.016
+        min_fill_size = 2;
+        max_fill_size = 5;
+    } else {
+        // Conservative default for unknown products
+        passive_fill_prob_buy = 15.0 / 2000.0;
+        passive_fill_prob_sell = 15.0 / 2000.0;
+        min_fill_size = 2;
+        max_fill_size = 6;
+    }
 }
 
 void LimitOrderBook::cancel_all_resting() {
@@ -14,30 +45,15 @@ void LimitOrderBook::cancel_all_resting() {
 }
 
 void LimitOrderBook::match_orders(const std::vector<StrategyOrder>& orders) {
-    // Orders go into pending to simulate 1-tick latency
     pending_orders = orders;
 }
 
-int32_t LimitOrderBook::calculate_queue_ahead(int32_t price, bool is_buy, const OrderBookState& state) const {
-    // Cast uint32_t prices and volumes to int32_t to match our order structs safely
-    if (is_buy) {
-        if (price == (int32_t)state.bid_price_1) return (int32_t)state.bid_volume_1;
-        if (price == (int32_t)state.bid_price_2) return (int32_t)state.bid_volume_2;
-        if (price == (int32_t)state.bid_price_3) return (int32_t)state.bid_volume_3;
-    } else {
-        if (price == (int32_t)state.ask_price_1) return (int32_t)state.ask_volume_1;
-        if (price == (int32_t)state.ask_price_2) return (int32_t)state.ask_volume_2;
-        if (price == (int32_t)state.ask_price_3) return (int32_t)state.ask_volume_3;
-    }
-    // If we are improving the best bid/ask, our queue ahead is 0!
-    return 0; 
-}
-
-void LimitOrderBook::update(const OrderBookState& state, const std::vector<PublicTrade>& trades) {
+void LimitOrderBook::update(const OrderBookState& state, const std::vector<PublicTrade>& /*trades*/) {
     current_state = state;
     uint32_t ts = state.timestamp;
+    init_rng();
 
-    // 1. Process latency: Pending cancels and new orders from the LAST tick arrive now
+    // ═══ 1. LATENCY: Pending cancels and orders from LAST tick arrive now ═══
     if (cancel_requested) {
         resting_orders.clear();
         cancel_requested = false;
@@ -45,93 +61,119 @@ void LimitOrderBook::update(const OrderBookState& state, const std::vector<Publi
 
     if (!pending_orders.empty()) {
         for (auto& order : pending_orders) {
-            // Calculate how many people beat us to this price level
-            order.queue_ahead = calculate_queue_ahead(order.price, order.is_buy(), current_state);
             resting_orders.push_back(order);
         }
         pending_orders.clear();
     }
 
-    // 2. Queue Depletion: Public trades eat through the queue
-    for (const auto& trade : trades) {
-        for (auto& order : resting_orders) {
-            if (order.quantity == 0) continue;
-
-            // If a public trade happened at our exact price level
-            if (order.price == trade.price) {
-                // Determine if this public trade was a Buy or Sell based on the book (with casts)
-                bool trade_was_buy = (trade.price >= (int32_t)current_state.ask_price_1 && current_state.ask_price_1 > 0);
-                bool trade_was_sell = (trade.price <= (int32_t)current_state.bid_price_1 && current_state.bid_price_1 > 0);
-
-                // If the trade matches our side, it's eating our queue
-                if ((order.is_buy() && trade_was_sell) || (order.is_sell() && trade_was_buy) || (!trade_was_buy && !trade_was_sell)) {
-                    if (order.queue_ahead > 0) {
-                        order.queue_ahead -= trade.quantity;
-                        // Did the trade eat through the queue and partially fill us?
-                        if (order.queue_ahead < 0) {
-                            int fill_qty = std::min(std::abs(order.quantity), -order.queue_ahead);
-                            if (order.is_sell()) fill_qty = -fill_qty;
-                            
-                            process_fills(ts, order.price, fill_qty, false);
-                            order.quantity -= fill_qty;
-                            order.queue_ahead = 0; 
-                        }
-                    } else {
-                        // We are at the front of the queue! We get filled.
-                        int fill_qty = std::min(std::abs(order.quantity), trade.quantity);
-                        if (order.is_sell()) fill_qty = -fill_qty;
-
-                        process_fills(ts, order.price, fill_qty, false);
-                        order.quantity -= fill_qty;
-                    }
-                }
-            }
-        }
-    }
-
-    // 3. Aggressive Crosses: Did the market price move straight through our resting limit orders?
+    // ═══ 2. AGGRESSIVE CROSSES ═══
+    // Orders priced through the spread fill immediately at book price
     for (auto& order : resting_orders) {
         if (order.quantity == 0) continue;
 
         if (order.is_buy() && state.ask_price_1 > 0 && order.price >= (int32_t)state.ask_price_1) {
             int max_can_buy = position_limit - position;
             if (max_can_buy <= 0) continue;
-            
-            int fill_qty = std::min(order.quantity, max_can_buy);
-            fill_qty = std::min(fill_qty, (int)state.ask_volume_1); // Bound by available volume
-            
-            process_fills(ts, (int32_t)state.ask_price_1, fill_qty, true);
-            order.quantity -= fill_qty;
+
+            struct Level { uint32_t price; int32_t vol; };
+            Level asks[] = {
+                {state.ask_price_1, (int32_t)state.ask_volume_1},
+                {state.ask_price_2, (int32_t)state.ask_volume_2},
+                {state.ask_price_3, (int32_t)state.ask_volume_3},
+            };
+
+            int remaining = std::min(std::abs(order.quantity), max_can_buy);
+            for (auto& lvl : asks) {
+                if (lvl.price == 0 || lvl.vol == 0 || remaining <= 0) break;
+                if (order.price < (int32_t)lvl.price) break;
+                int fill_qty = std::min(remaining, std::abs(lvl.vol));
+                process_fills(ts, (int32_t)lvl.price, fill_qty, true);
+                remaining -= fill_qty;
+                order.quantity -= fill_qty;
+            }
         }
         else if (order.is_sell() && state.bid_price_1 > 0 && order.price <= (int32_t)state.bid_price_1) {
             int max_can_sell = position_limit + position;
             if (max_can_sell <= 0) continue;
-            
-            int fill_qty = std::min(std::abs(order.quantity), max_can_sell);
-            fill_qty = std::min(fill_qty, (int)state.bid_volume_1);
-            
-            process_fills(ts, (int32_t)state.bid_price_1, -fill_qty, true);
-            order.quantity += fill_qty; // Quantity is negative for sells
+
+            struct Level { uint32_t price; int32_t vol; };
+            Level bids[] = {
+                {state.bid_price_1, (int32_t)state.bid_volume_1},
+                {state.bid_price_2, (int32_t)state.bid_volume_2},
+                {state.bid_price_3, (int32_t)state.bid_volume_3},
+            };
+
+            int remaining = std::min(std::abs(order.quantity), max_can_sell);
+            for (auto& lvl : bids) {
+                if (lvl.price == 0 || lvl.vol == 0 || remaining <= 0) break;
+                if (order.price > (int32_t)lvl.price) break;
+                int fill_qty = std::min(remaining, std::abs(lvl.vol));
+                process_fills(ts, (int32_t)lvl.price, -fill_qty, true);
+                remaining -= fill_qty;
+                order.quantity += fill_qty;
+            }
         }
     }
 
-    // Clean up fully filled orders
+    // ═══ 3. STOCHASTIC PASSIVE FILLS ═══
+    // This is the SOLE source of passive fills. No public trade matching.
+    // Calibrated from real exchange data: bots interact with resting orders
+    // at fixed rates regardless of quote width or order size.
+    // Fill happens at YOUR resting price. Size is bot-determined (3-8 or 2-5).
+    std::uniform_real_distribution<double> prob_dist(0.0, 1.0);
+    std::uniform_int_distribution<int> size_dist(min_fill_size, max_fill_size);
+
+    for (auto& order : resting_orders) {
+        if (order.quantity == 0) continue;
+
+        if (order.is_buy()) {
+            // Skip if this would be an aggressive cross (already handled above)
+            if (state.ask_price_1 > 0 && order.price >= (int32_t)state.ask_price_1) continue;
+
+            if (prob_dist(rng) < passive_fill_prob_buy) {
+                int max_can_buy = position_limit - position;
+                if (max_can_buy <= 0) continue;
+                int bot_qty = size_dist(rng);
+                int fill_qty = std::min({bot_qty, std::abs(order.quantity), max_can_buy});
+                if (fill_qty > 0) {
+                    process_fills(ts, order.price, fill_qty, false);
+                    order.quantity -= fill_qty;
+                }
+            }
+        }
+        else if (order.is_sell()) {
+            if (state.bid_price_1 > 0 && order.price <= (int32_t)state.bid_price_1) continue;
+
+            if (prob_dist(rng) < passive_fill_prob_sell) {
+                int max_can_sell = position_limit + position;
+                if (max_can_sell <= 0) continue;
+                int bot_qty = size_dist(rng);
+                int fill_qty = std::min({bot_qty, std::abs(order.quantity), max_can_sell});
+                if (fill_qty > 0) {
+                    process_fills(ts, order.price, -fill_qty, false);
+                    order.quantity += fill_qty;
+                }
+            }
+        }
+    }
+
+    // ═══ 4. CLEANUP ═══
     resting_orders.erase(
-        std::remove_if(resting_orders.begin(), resting_orders.end(), 
-            [](const StrategyOrder& o) { return o.quantity == 0; }), 
+        std::remove_if(resting_orders.begin(), resting_orders.end(),
+            [](const StrategyOrder& o) { return o.quantity == 0; }),
         resting_orders.end()
     );
 
-    // 4. True Mark-to-Market PnL Calculation
-    result.total_pnl = result.cash + (position * current_state.mid_price());
+    // ═══ 5. MARK-TO-MARKET ═══
+    double mid = current_state.mid_price();
+    result.total_pnl = result.cash + (position * mid);
     result.update_drawdown(result.total_pnl);
 
-    // Update MTM PnL snapshot
     PnLSnapshot snap;
     snap.timestamp = ts;
     snap.position = position;
-    snap.cash = result.cash; 
-    snap.mtm_pnl = result.total_pnl; 
+    snap.cash = result.cash;
+    snap.mtm_pnl = result.total_pnl;
     result.pnl_history.push_back(snap);
 }
 
@@ -153,10 +195,7 @@ void LimitOrderBook::process_fills(uint32_t timestamp, int32_t price, int32_t qu
         result.total_volume += std::abs(quantity);
     }
 
-    // Adjust position
     position += quantity;
-    
-    // Accurately track raw cash flow
-    result.cash -= (double)price * quantity; 
+    result.cash -= (double)price * quantity;
     result.final_position = position;
 }

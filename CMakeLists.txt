@@ -26,3 +26,5 @@ add_executable(translator scripts/translator.cpp)
 
 add_executable(sweep scripts/sweep.cpp)
 target_link_libraries(sweep engine)
+
+add_executable(parse_logs scripts/parse_logs.cpp)

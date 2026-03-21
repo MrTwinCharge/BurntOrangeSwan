@@ -4,7 +4,7 @@ from typing import Dict, List, Tuple
 
 class Trader:
     EDGE = 0
-    ORDER_SIZE = 20
+    ORDER_SIZE = 14
     LIMIT = 50
 
     def run(self, state: TradingState) -> Tuple[Dict[str, List[Order]], int, str]:
