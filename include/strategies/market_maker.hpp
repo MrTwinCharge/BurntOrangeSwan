@@ -6,6 +6,10 @@
 class MarketMaker : public Strategy {
 private:
     std::vector<StrategyOrder> orders;
+    std::vector<int32_t> current_bids;
+    std::vector<int32_t> current_asks;
+    std::vector<int> last_positions;
+    bool initialized = false;
 
 public:
     int default_edge = 2;
@@ -16,35 +20,48 @@ public:
                  [[maybe_unused]] const std::vector<std::vector<PublicTrade>>& trades,
                  std::vector<LimitOrderBook>& lobs) override {
 
+        if (!initialized) {
+            current_bids.assign(books.size(), 0);
+            current_asks.assign(books.size(), 0);
+            last_positions.assign(books.size(), 0);
+            initialized = true;
+        }
+
         for (size_t i = 0; i < books.size(); ++i) {
             if (!trade_flags[i]) continue;
 
             auto& book = books[i];
             auto& lob = lobs[i];
 
-            lob.cancel_all_resting();
-            orders.clear();
-
-            if (book.bid_price_1 == 0 || book.ask_price_1 == 0) {
-                lob.match_orders(orders);
-                continue;
-            }
+            if (book.bid_price_1 == 0 || book.ask_price_1 == 0) continue;
 
             double fair_value = std::round(book.mid_price());
 
-            int32_t our_bid = (int32_t)fair_value - default_edge;
-            int32_t our_ask = (int32_t)fair_value + default_edge;
+            int32_t target_bid = (int32_t)fair_value - default_edge;
+            int32_t target_ask = (int32_t)fair_value + default_edge;
 
-            our_bid = std::min(our_bid, (int32_t)book.bid_price_1);
-            our_ask = std::max(our_ask, (int32_t)book.ask_price_1);
+            target_bid = std::min(target_bid, (int32_t)book.bid_price_1);
+            target_ask = std::max(target_ask, (int32_t)book.ask_price_1);
 
-            int max_buy = lob.position_limit - lob.position;
-            int max_sell = lob.position_limit + lob.position;
+            // 🚀 THE FIX: Only cancel & replace if our target price moved, 
+            // OR if we got a fill and need to replenish our order size!
+            if (target_bid != current_bids[i] || target_ask != current_asks[i] || lob.position != last_positions[i]) {
+                
+                lob.cancel_all_resting();
+                orders.clear();
 
-            if (max_buy > 0) orders.push_back({our_bid, std::min(default_order_size, max_buy)});
-            if (max_sell > 0) orders.push_back({our_ask, -std::min(default_order_size, max_sell)});
+                int max_buy = lob.position_limit - lob.position;
+                int max_sell = lob.position_limit + lob.position;
 
-            lob.match_orders(orders);
+                if (max_buy > 0) orders.push_back({target_bid, std::min(default_order_size, max_buy)});
+                if (max_sell > 0) orders.push_back({target_ask, -std::min(default_order_size, max_sell)});
+
+                lob.match_orders(orders);
+
+                current_bids[i] = target_bid;
+                current_asks[i] = target_ask;
+                last_positions[i] = lob.position;
+            }
         }
     }
 };

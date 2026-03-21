@@ -70,6 +70,7 @@ struct PnLSnapshot {
 struct ProductResult {
     std::string symbol;
     double total_pnl = 0.0;
+    double cash = 0.0;
     int total_buys = 0;
     int total_sells = 0;
     int total_volume = 0;
