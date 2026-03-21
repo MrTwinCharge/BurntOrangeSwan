@@ -1,41 +1,69 @@
+#pragma once
 #include "engine/strategy.hpp"
 #include <iostream>
 #include <cmath>
-
+ 
 class OmniImbalance : public Strategy {
 public:
-    void on_tick(uint32_t timestamp, 
+    double default_threshold = 0.15;  // lowered — tutorial data is near-symmetric
+    int    default_size      = 10;
+    bool   verbose           = false;
+ 
+    struct Params { double threshold; int size; };
+    std::map<std::string, Params> overrides;
+ 
+    void on_tick(uint32_t timestamp,
                  const std::map<std::string, OrderBookState>& books,
                  const std::map<std::string, std::vector<PublicTrade>>& trades,
                  std::map<std::string, LimitOrderBook>& lobs) override {
-        
-        for (auto const& [symbol, book] : books) {
-            // 1. Calculate OBI
-            double bid_vol = book.best_bid_volume;
-            double ask_vol = std::abs((double)book.best_ask_volume);
-            double imbalance = (bid_vol - ask_vol) / (bid_vol + ask_vol);
-
-            // 2. Track "Aggression" (Did someone just sweep the book?)
-            int trade_volume = 0;
-            if (trades.count(symbol)) {
-                for (const auto& t : trades.at(symbol)) {
-                    trade_volume += t.quantity;
-                }
+ 
+        for (const auto& [symbol, book] : books) {
+            auto& lob = lobs[symbol];
+ 
+            double threshold = default_threshold;
+            int size = default_size;
+            auto it = overrides.find(symbol);
+            if (it != overrides.end()) {
+                threshold = it->second.threshold;
+                size = it->second.size;
             }
-
-            // 3. NEW LOGIC: Buy if imbalance is high OR if we see trade activity 
-            // confirming the move. 
-            // Threshold lowered to 0.4 for more activity.
-            if (imbalance > 0.4 && lobs[symbol].position < 200) {
-                auto res = lobs[symbol].market_buy(10, book.best_ask_price);
-                if(res.quantity > 0) {
-                    std::cout << "[" << timestamp << "] BUY " << symbol << " @ " << book.best_ask_price << " | OBI: " << imbalance << std::endl;
-                }
-            } 
-            else if (imbalance < -0.4 && lobs[symbol].position > -200) {
-                auto res = lobs[symbol].market_sell(10, book.best_bid_price);
-                if(res.quantity > 0) {
-                    std::cout << "[" << timestamp << "] SELL " << symbol << " @ " << book.best_bid_price << " | OBI: " << imbalance << std::endl;
+ 
+            // Skip if book is empty
+            if (book.bid_price_1 == 0 || book.ask_price_1 == 0) {
+                lob.match_orders({});
+                continue;
+            }
+ 
+            // Full L3 OBI
+            double imbalance = book.obi();
+ 
+            // Also check: is the mid price drifting vs our fair (weighted mid)?
+            double wmid = book.weighted_mid();
+            double mid  = book.mid_price();
+            double drift = (wmid - mid) / std::max(mid, 1.0);
+ 
+            std::vector<StrategyOrder> orders;
+ 
+            if (imbalance > threshold || drift > 0.0002) {
+                // Buy signal — take the best ask
+                orders.push_back({(int32_t)book.ask_price_1, size});
+            }
+            else if (imbalance < -threshold || drift < -0.0002) {
+                // Sell signal — hit the best bid
+                orders.push_back({(int32_t)book.bid_price_1, -size});
+            }
+ 
+            auto fills = lob.match_orders(orders);
+ 
+            if (verbose) {
+                for (const auto& f : fills) {
+                    std::cout << "[" << timestamp << "] "
+                              << (f.quantity > 0 ? "BUY " : "SELL ")
+                              << symbol << " " << std::abs(f.quantity)
+                              << "@" << f.price
+                              << " | OBI=" << imbalance
+                              << " drift=" << drift
+                              << " | Pos: " << lob.position << std::endl;
                 }
             }
         }

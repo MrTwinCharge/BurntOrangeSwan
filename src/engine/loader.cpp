@@ -5,33 +5,45 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-const OrderBookState* load_binary_data(const std::string& filepath, size_t& out_num_ticks) {
-    // 1. Open the file
+void* mmap_file(const std::string& filepath, size_t& out_size_bytes) {
     int fd = open(filepath.c_str(), O_RDONLY);
     if (fd == -1) {
-        std::cerr << "Fatal: Could not open binary file: " << filepath << std::endl;
+        std::cerr << "[Loader] Fatal: Could not open: " << filepath << std::endl;
         return nullptr;
     }
 
-    // 2. Get file size
     struct stat sb;
     if (fstat(fd, &sb) == -1) {
-        std::cerr << "Fatal: Could not get file size." << std::endl;
+        std::cerr << "[Loader] Fatal: Could not stat: " << filepath << std::endl;
         close(fd);
         return nullptr;
     }
 
-    // 3. Map the file to memory
-    void* mapped_data = mmap(nullptr, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    if (mapped_data == MAP_FAILED) {
-        std::cerr << "Fatal: mmap() failed." << std::endl;
-        close(fd);
+    out_size_bytes = sb.st_size;
+
+    void* mapped = mmap(nullptr, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd); // safe to close after mmap
+
+    if (mapped == MAP_FAILED) {
+        std::cerr << "[Loader] Fatal: mmap() failed for: " << filepath << std::endl;
         return nullptr;
     }
 
-    // The OS keeps the mapping even after we close the file descriptor
-    close(fd);
+    return mapped;
+}
 
-    out_num_ticks = sb.st_size / sizeof(OrderBookState);
-    return static_cast<const OrderBookState*>(mapped_data);
+const OrderBookState* load_price_data(const std::string& filepath, size_t& out_count) {
+    size_t bytes = 0;
+    void* data = mmap_file(filepath, bytes);
+    if (!data) { out_count = 0; return nullptr; }
+    out_count = bytes / sizeof(OrderBookState);
+    return static_cast<const OrderBookState*>(data);
+}
+
+const PublicTrade* load_trade_data(const std::string& filepath, size_t& out_count) {
+    size_t bytes = 0;
+    void* data = mmap_file(filepath, bytes);
+    if (!data) { out_count = 0; return nullptr; }
+    out_count = bytes / sizeof(PublicTrade);
+    return static_cast<const PublicTrade*>(data);
 }

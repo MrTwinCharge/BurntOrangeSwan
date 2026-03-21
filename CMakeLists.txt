@@ -17,5 +17,9 @@ add_library(engine src/engine/loader.cpp src/engine/lob.cpp)
 add_executable(translator scripts/translator.cpp)
 # Link the core engine library so the translator can use your struct definitions
 target_link_libraries(translator engine)
+
 add_executable(backtester src/main.cpp)
 target_link_libraries(backtester engine)
+
+add_executable(sweep scripts/sweep.cpp)
+target_link_libraries(sweep engine)
