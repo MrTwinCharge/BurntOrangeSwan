@@ -1,25 +1,28 @@
 cmake_minimum_required(VERSION 3.10)
-
-# Name your project and set the language to C++
-project(ProsperityEngine CXX)
+project(prosperity_engine)
 
 set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED True)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Add maximum compiler optimization flags for speed (-O3)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -Wall -Wextra")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=native -flto=auto -Wall -Wextra")
 
-# Tell CMake where your header files live
+find_package(OpenMP REQUIRED)
+if(OpenMP_CXX_FOUND)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
+endif()
+
 include_directories(include)
 
-add_library(engine src/engine/loader.cpp src/engine/lob.cpp)
-
-add_executable(translator scripts/translator.cpp)
-# Link the core engine library so the translator can use your struct definitions
-target_link_libraries(translator engine)
+add_library(engine STATIC 
+    src/engine/loader.cpp 
+    src/engine/lob.cpp
+)
 
 add_executable(backtester src/main.cpp)
 target_link_libraries(backtester engine)
+
+add_executable(translator scripts/translator.cpp)
 
 add_executable(sweep scripts/sweep.cpp)
 target_link_libraries(sweep engine)

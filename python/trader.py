@@ -3,9 +3,9 @@ from typing import Dict, List, Tuple
 
 
 class Trader:
-    MAX_POS_FRAC = 0.80
+    MAX_POS_FRAC = 0.40
     ORDER_SIZE = 10
-    MIN_SPREAD = 2
+    MIN_SPREAD = 10
     LIMIT = 50
 
     def run(self, state: TradingState) -> Tuple[Dict[str, List[Order]], int, str]:

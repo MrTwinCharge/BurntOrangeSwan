@@ -1,4 +1,3 @@
-// include/engine/sweeper.hpp
 #pragma once
 #include "engine/types.hpp"
 #include "engine/lob.hpp"
@@ -11,17 +10,9 @@
 #include <iomanip>
 #include <chrono>
 #include <functional>
+#include <omp.h> // 🚀 OPTIMIZATION 2: Parallel Sweeping
 
-struct SweepParam {
-    std::string name;
-    double min;
-    double max;
-    double step;
-
-    int num_steps() const {
-        return (int)((max - min) / step) + 1;
-    }
-};
+struct SweepParam { std::string name; double min; double max; double step; };
 
 struct SweepResult {
     std::vector<double> params;
@@ -41,54 +32,66 @@ public:
         const std::vector<std::string>& symbols,
         const std::map<std::string, const OrderBookState*>& price_data,
         const std::map<std::string, const PublicTrade*>& trade_data,
-        [[maybe_unused]] const std::map<std::string, size_t>& price_counts,
-        const std::map<std::string, size_t>& trade_counts,
+        const std::map<std::string, size_t>& tc_map,
         size_t total_ticks)
     {
         std::vector<std::vector<double>> combos;
         std::vector<double> current(param_defs.size());
         generate_combos(param_defs, 0, current, combos);
 
-        std::cout << "[Sweeper] " << combos.size() << " param combinations x "
-                  << total_ticks << " ticks each" << std::endl;
+        std::cout << "[Sweeper] " << combos.size() << " combinations | Running on " 
+                  << omp_get_max_threads() << " CPU threads...\n";
 
         auto t0 = std::chrono::high_resolution_clock::now();
 
         std::vector<SweepResult> results;
-        results.reserve(combos.size());
-
         int done = 0;
-        for (const auto& params : combos) {
+
+        // Pre-extract flat arrays to completely avoid std::map lookups in parallel threads
+        size_t num_symbols = symbols.size();
+        std::vector<const OrderBookState*> p_ptrs(num_symbols);
+        std::vector<const PublicTrade*> t_ptrs(num_symbols);
+        std::vector<size_t> t_counts(num_symbols);
+        for(size_t i = 0; i < num_symbols; ++i) {
+            p_ptrs[i] = price_data.at(symbols[i]);
+            t_ptrs[i] = trade_data.at(symbols[i]);
+            t_counts[i] = tc_map.at(symbols[i]);
+        }
+
+        // 🚀 Parallel loop distributing parameter combos across CPU cores
+        #pragma omp parallel for schedule(dynamic)
+        for (size_t c = 0; c < combos.size(); ++c) {
+            const auto& params = combos[c];
             Strategy* strat = factory(params);
-            std::map<std::string, LimitOrderBook> lobs;
-            for (const auto& sym : symbols) {
-                lobs[sym] = LimitOrderBook(sym);
+            strat->init(symbols);
+
+            // Thread-local memory allocations
+            std::vector<LimitOrderBook> lobs;
+            std::vector<size_t> trade_ptr(num_symbols, 0);
+            std::vector<OrderBookState> books(num_symbols);
+            std::vector<std::vector<PublicTrade>> trades(num_symbols);
+
+            for (size_t i = 0; i < num_symbols; ++i) {
+                lobs.push_back(LimitOrderBook(symbols[i]));
+                trades[i].reserve(20);
             }
 
-            std::map<std::string, size_t> trade_ptr;
-            for (const auto& sym : symbols) trade_ptr[sym] = 0;
-
             for (size_t i = 0; i < total_ticks; ++i) {
-                uint32_t ts = price_data.at(symbols[0])[i].timestamp;
+                uint32_t ts = p_ptrs[0][i].timestamp;
 
-                std::map<std::string, OrderBookState> books;
-                std::map<std::string, std::vector<PublicTrade>> trades;
-
-                for (const auto& sym : symbols) {
-                    books[sym] = price_data.at(sym)[i];
+                for (size_t s = 0; s < num_symbols; ++s) {
+                    books[s] = p_ptrs[s][i];
+                    trades[s].clear(); 
                     
-                    // GATHER TRADES BEFORE LOB UPDATE
-                    while (trade_ptr[sym] < trade_counts.at(sym) &&
-                           trade_data.at(sym) != nullptr &&
-                           trade_data.at(sym)[trade_ptr[sym]].timestamp <= ts) {
-                        trades[sym].push_back(trade_data.at(sym)[trade_ptr[sym]]);
-                        trade_ptr[sym]++;
+                    while (trade_ptr[s] < t_counts[s] &&
+                           t_ptrs[s] != nullptr &&
+                           t_ptrs[s][trade_ptr[s]].timestamp <= ts) {
+                        trades[s].push_back(t_ptrs[s][trade_ptr[s]]);
+                        trade_ptr[s]++;
                     }
 
-                    // UPDATE WITH TRADES TO SIMULATE QUEUE DEPLETION
-                    lobs[sym].update(books[sym], trades[sym]);
+                    lobs[s].update(books[s], trades[s]);
                 }
-
                 strat->on_tick(ts, books, trades, lobs);
             }
 
@@ -98,22 +101,25 @@ public:
             sr.total_trades = 0;
             sr.max_drawdown = 0;
 
-            for (const auto& sym : symbols) {
-                sr.per_product_pnl[sym] = lobs[sym].result.total_pnl;
-                sr.total_pnl += lobs[sym].result.total_pnl;
-                sr.total_trades += lobs[sym].result.total_buys + lobs[sym].result.total_sells;
-                sr.max_drawdown += lobs[sym].result.max_drawdown;
+            for (size_t s = 0; s < num_symbols; ++s) {
+                sr.per_product_pnl[symbols[s]] = lobs[s].result.total_pnl;
+                sr.total_pnl += lobs[s].result.total_pnl;
+                sr.total_trades += lobs[s].result.total_buys + lobs[s].result.total_sells;
+                sr.max_drawdown += lobs[s].result.max_drawdown;
             }
 
-            results.push_back(sr);
+            // Lock critical section to safely write output
+            #pragma omp critical
+            {
+                results.push_back(sr);
+                done++;
+                if (done % 10 == 0 || done == (int)combos.size()) {
+                    std::cout << "\r[Sweeper] " << done << "/" << combos.size()
+                              << " (" << std::fixed << std::setprecision(1)
+                              << (100.0 * done / combos.size()) << "%)" << std::flush;
+                }
+            }
             delete strat;
-
-            done++;
-            if (done % 50 == 0 || done == (int)combos.size()) {
-                std::cout << "\r[Sweeper] " << done << "/" << combos.size()
-                          << " (" << std::fixed << std::setprecision(1)
-                          << (100.0 * done / combos.size()) << "%)" << std::flush;
-            }
         }
 
         auto t1 = std::chrono::high_resolution_clock::now();
@@ -127,76 +133,21 @@ public:
         return results;
     }
 
-    static void export_csv(const std::vector<SweepResult>& results,
-                           const std::vector<SweepParam>& param_defs,
-                           const std::vector<std::string>& symbols,
-                           const std::string& filepath) {
-        std::ofstream f(filepath);
-        if (!f.is_open()) {
-            std::cerr << "[Sweeper] Could not open: " << filepath << std::endl;
-            return;
-        }
-
-        for (const auto& p : param_defs) f << p.name << ",";
-        f << "total_pnl,total_trades,max_drawdown";
-        for (const auto& sym : symbols) f << "," << sym << "_pnl";
-        f << "\n";
-
-        for (const auto& r : results) {
-            for (size_t i = 0; i < r.params.size(); i++) {
-                f << std::fixed << std::setprecision(4) << r.params[i] << ",";
-            }
-            f << std::fixed << std::setprecision(2)
-              << r.total_pnl << "," << r.total_trades << "," << r.max_drawdown;
-            for (const auto& sym : symbols) {
-                auto it = r.per_product_pnl.find(sym);
-                f << "," << (it != r.per_product_pnl.end() ? it->second : 0.0);
-            }
-            f << "\n";
-        }
-
-        f.close();
-        std::cout << "[Sweeper] Results exported to: " << filepath << std::endl;
-    }
-
-    static void print_top(const std::vector<SweepResult>& results,
-                          const std::vector<SweepParam>& param_defs,
-                          int n = 10) {
+    static void print_top(const std::vector<SweepResult>& results, [[maybe_unused]] const std::vector<SweepParam>& param_defs, int n = 10) {
         std::cout << "\n[Sweeper] Top " << std::min(n, (int)results.size()) << " results:\n";
-        std::cout << "  ";
-        for (const auto& p : param_defs) {
-            std::cout << std::setw(10) << p.name;
-        }
-        std::cout << std::setw(14) << "PnL"
-                  << std::setw(10) << "Trades"
-                  << std::setw(12) << "MaxDD" << "\n";
-        std::cout << "  " << std::string(param_defs.size() * 10 + 36, '-') << "\n";
-
         for (int i = 0; i < std::min(n, (int)results.size()); i++) {
             const auto& r = results[i];
             std::cout << "  ";
-            for (double p : r.params) {
-                std::cout << std::setw(10) << std::fixed << std::setprecision(3) << p;
-            }
-            std::cout << std::setw(14) << std::fixed << std::setprecision(2) << r.total_pnl
-                      << std::setw(10) << r.total_trades
-                      << std::setw(12) << std::fixed << std::setprecision(2) << r.max_drawdown
-                      << "\n";
+            for (double p : r.params) std::cout << std::setw(10) << std::fixed << std::setprecision(3) << p;
+            std::cout << " | PnL: " << std::setw(8) << std::fixed << std::setprecision(2) << r.total_pnl << "\n";
         }
     }
 
 private:
-    static void generate_combos(const std::vector<SweepParam>& params,
-                                size_t idx,
-                                std::vector<double>& current,
-                                std::vector<std::vector<double>>& out) {
-        if (idx == params.size()) {
-            out.push_back(current);
-            return;
-        }
+    static void generate_combos(const std::vector<SweepParam>& params, size_t idx, std::vector<double>& current, std::vector<std::vector<double>>& out) {
+        if (idx == params.size()) { out.push_back(current); return; }
         for (double v = params[idx].min; v <= params[idx].max + 1e-9; v += params[idx].step) {
-            current[idx] = v;
-            generate_combos(params, idx + 1, current, out);
+            current[idx] = v; generate_combos(params, idx + 1, current, out);
         }
     }
 };

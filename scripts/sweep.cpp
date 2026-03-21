@@ -16,7 +16,7 @@
 #include "strategies/market_maker.hpp"
 #include "strategies/mean_reversion.hpp"
 #include "strategies/spread_capture.hpp"
-#include "strategies/fair_value.hpp" // <-- ADDED FAIR VALUE INCLUDE
+#include "strategies/fair_value.hpp"
 
 namespace fs = std::filesystem;
 
@@ -62,7 +62,6 @@ std::vector<StrategyEntry> build_registry() {
             return s;
         }});
 
-    // <-- ADDED FAIR VALUE REGISTRATION
     reg.push_back({"fv", "trader_fv.py",
         {{"threshold", 0.5, 3.0, 0.5}, {"order_size", 2, 20, 2}},
         [](const std::vector<double>& p) -> Strategy* {
@@ -80,20 +79,30 @@ void run_and_save(const std::string& strat_name, Strategy* strat,
     const std::map<std::string,const PublicTrade*>& td,
     const std::map<std::string,size_t>& tc, size_t ticks) {
 
-    std::map<std::string,LimitOrderBook> lobs;
-    for (const auto& s : symbols) lobs[s] = LimitOrderBook(s);
-    std::map<std::string,size_t> tp;
-    for (const auto& s : symbols) tp[s] = 0;
+    // Initialize strategy arrays to map integers instead of using string maps
+    strat->init(symbols);
+    size_t num_symbols = symbols.size();
+    
+    // Memory-efficient Vectors
+    std::vector<LimitOrderBook> lobs;
+    std::vector<size_t> tp(num_symbols, 0);
+    std::vector<OrderBookState> bk(num_symbols);
+    std::vector<std::vector<PublicTrade>> tr(num_symbols);
+
+    for (size_t s = 0; s < num_symbols; ++s) {
+        lobs.push_back(LimitOrderBook(symbols[s]));
+        tr[s].reserve(20);
+    }
 
     for (size_t i = 0; i < ticks; ++i) {
         uint32_t ts = pd.at(symbols[0])[i].timestamp;
-        std::map<std::string,OrderBookState> bk;
-        std::map<std::string,std::vector<PublicTrade>> tr;
-        for (const auto& s : symbols) {
-            bk[s] = pd.at(s)[i];
+        
+        for (size_t s = 0; s < num_symbols; ++s) {
+            bk[s] = pd.at(symbols[s])[i];
+            tr[s].clear(); // Fast reset instead of reallocation
             
-            while (tp[s] < tc.at(s) && td.at(s) && td.at(s)[tp[s]].timestamp <= ts) {
-                tr[s].push_back(td.at(s)[tp[s]]);
+            while (tp[s] < tc.at(symbols[s]) && td.at(symbols[s]) && td.at(symbols[s])[tp[s]].timestamp <= ts) {
+                tr[s].push_back(td.at(symbols[s])[tp[s]]);
                 tp[s]++;
             }
             lobs[s].update(bk[s], tr[s]);
@@ -101,14 +110,20 @@ void run_and_save(const std::string& strat_name, Strategy* strat,
         strat->on_tick(ts, bk, tr, lobs);
     }
 
+    // Convert vector results back to string maps for the exporter
+    std::map<std::string, LimitOrderBook> out_lobs;
+    for (size_t s = 0; s < num_symbols; ++s) {
+        out_lobs[symbols[s]] = lobs[s];
+    }
+
     std::string pnl_path = "../results/pnl_" + strat_name + ".csv";
     std::string trades_path = "../results/trades_" + strat_name + ".csv";
-    results::export_pnl_csv(lobs, pnl_path);
-    results::export_trades_csv(lobs, trades_path);
+    results::export_pnl_csv(out_lobs, pnl_path);
+    results::export_trades_csv(out_lobs, trades_path);
 
     double total = 0;
     int total_trades = 0;
-    for (const auto& [sym, lob] : lobs) {
+    for (const auto& [sym, lob] : out_lobs) {
         total += lob.result.total_pnl;
         total_trades += lob.result.total_buys + lob.result.total_sells;
     }
@@ -139,7 +154,7 @@ void generate_trader(const StrategyEntry& entry, const SweepResult& best) {
         std::ostringstream f; f << std::fixed << std::setprecision(2) << best.params[0];
         inject("MAX_POS_FRAC", f.str()); inject("ORDER_SIZE", std::to_string((int)best.params[1]));
         inject("MIN_SPREAD", std::to_string((int)best.params[2]));
-    } else if (entry.name == "fv") { // <-- ADDED FAIR VALUE INJECTION
+    } else if (entry.name == "fv") { 
         std::ostringstream t; t << std::fixed << std::setprecision(2) << best.params[0];
         inject("THRESHOLD", t.str()); inject("ORDER_SIZE", std::to_string((int)best.params[1]));
     }
@@ -257,7 +272,10 @@ int main(int argc, char* argv[]) {
     for (const auto& e : torun) {
         std::cout << "══════════════════════════════════════════\n  Sweeping: " << e.name
                   << "\n══════════════════════════════════════════\n\n";
-        auto res = ParamSweeper::sweep(e.params, e.factory, sym, pd, td, pc, tc, ticks);
+                  
+        // Note: We removed the 'pc' map parameter to match the updated sweeper API
+        auto res = ParamSweeper::sweep(e.params, e.factory, sym, pd, td, tc, ticks);
+        
         ParamSweeper::print_top(res, e.params, 5);
         std::cout << "\n";
         if (!res.empty()) all.push_back({e.name, e.python_template, res[0], e.params, e.factory});
@@ -267,7 +285,7 @@ int main(int argc, char* argv[]) {
     std::sort(all.begin(), all.end(), [](auto& a, auto& b) { return a.r.total_pnl > b.r.total_pnl; });
 
     std::cout << "\n╔══════════════════════════════════════════════════╗\n"
-              << "║  GLOBAL RANKINGS                                ║\n"
+              << "║  GLOBAL RANKINGS                                 ║\n"
               << "╠══════════════════════════════════════════════════╣\n";
     for (size_t i = 0; i < all.size(); i++) {
         auto& x = all[i];

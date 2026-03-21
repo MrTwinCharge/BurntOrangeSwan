@@ -24,7 +24,7 @@ struct OrderBookState {
     
     double weighted_mid() const {
         if (bid_volume_1 == 0 || ask_volume_1 == 0) return mid_price();
-        return (bid_price_1 * ask_volume_1 + ask_price_1 * bid_volume_1) / 
+        return (double(bid_price_1) * ask_volume_1 + double(ask_price_1) * bid_volume_1) / 
                (double)(bid_volume_1 + ask_volume_1);
     }
     
@@ -38,16 +38,15 @@ struct OrderBookState {
 
 struct PublicTrade {
     uint32_t timestamp;
-    std::string symbol;
+    char symbol[16]; // FIX: Replaced std::string
     int32_t price;
     int32_t quantity;
-    // Note: CSV doesn't specify side aggressively, but we can infer based on price relative to mid.
 };
 
 struct StrategyOrder {
     int32_t price;
     int32_t quantity;
-    int32_t queue_ahead = 0; // NEW: Volume ahead of us in the book
+    int32_t queue_ahead = 0;
 
     bool is_buy() const { return quantity > 0; }
     bool is_sell() const { return quantity < 0; }
