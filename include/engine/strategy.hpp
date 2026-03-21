@@ -1,25 +1,24 @@
 #pragma once
 #include "engine/types.hpp"
 #include "engine/lob.hpp"
-#include <string>
 #include <map>
+#include <string>
 #include <vector>
+#include <algorithm>
 
 class Strategy {
 public:
     virtual ~Strategy() = default;
 
-    /**
-     * Called once per tick with the current state of all products.
-     *
-     * @param timestamp     Current tick timestamp (ms)
-     * @param books         L3 order book snapshot per symbol
-     * @param trades        Public trades since last tick per symbol
-     * @param lobs          Limit order books (strategy places orders via these)
-     *
-     * The strategy should call lob.match_orders() with its desired orders.
-     * The engine will record all fills and PnL automatically.
-     */
+    // Filter to limit which products this strategy trades. 
+    // Empty means trade all available products.
+    std::vector<std::string> target_symbols; 
+
+    bool should_trade(const std::string& symbol) const {
+        if (target_symbols.empty()) return true;
+        return std::find(target_symbols.begin(), target_symbols.end(), symbol) != target_symbols.end();
+    }
+
     virtual void on_tick(uint32_t timestamp,
                          const std::map<std::string, OrderBookState>& books,
                          const std::map<std::string, std::vector<PublicTrade>>& trades,

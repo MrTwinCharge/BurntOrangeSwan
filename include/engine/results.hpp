@@ -72,7 +72,7 @@ inline void export_pnl_csv(const std::map<std::string, LimitOrderBook>& lobs,
     std::vector<std::string> symbols;
     for (const auto& [sym, _] : lobs) symbols.push_back(sym);
 
-    // Header
+    // Header (keeping "_mid" as header to not break the python visualizer)
     f << "timestamp";
     for (const auto& sym : symbols) {
         f << "," << sym << "_pnl"
@@ -105,7 +105,7 @@ inline void export_pnl_csv(const std::map<std::string, LimitOrderBook>& lobs,
                 f << "," << std::fixed << std::setprecision(2) << hist[i].mtm_pnl
                   << "," << hist[i].position
                   << "," << std::fixed << std::setprecision(2) << hist[i].cash
-                  << "," << std::fixed << std::setprecision(2) << hist[i].mid_price;
+                  << "," << std::fixed << std::setprecision(2) << hist[i].liquidation_price; // Updated here
                 total += hist[i].mtm_pnl;
             } else {
                 f << ",,,,";

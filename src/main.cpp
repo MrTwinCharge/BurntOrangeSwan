@@ -24,10 +24,11 @@ void print_usage() {
 int main(int argc, char* argv[]) {
     // ── Parse args ──
     std::string strategy_name = "omni";
-    bool verbose = false;
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
-        if (arg == "--verbose" || arg == "-v") verbose = true;
+        if (arg == "--verbose" || arg == "-v") {
+            // Ignored: Verbose mode was removed to optimize backtesting speed
+        }
         else if (arg == "--help" || arg == "-h") { print_usage(); return 0; }
         else strategy_name = arg;
     }
@@ -40,7 +41,6 @@ int main(int argc, char* argv[]) {
         return 1;
     }
  
-    // Scan for *_prices.bin files, extract product names
     std::vector<std::string> symbols;
     for (const auto& entry : fs::directory_iterator(bin_dir)) {
         if (!entry.is_regular_file()) continue;
@@ -78,14 +78,12 @@ int main(int argc, char* argv[]) {
         price_counts[sym] = p_count;
         lobs[sym]         = LimitOrderBook(sym);
  
-        // Try loading trades (optional — not fatal if missing)
         size_t t_count = 0;
         auto* trades = load_trade_data(bin_dir + sym + "_trades.bin", t_count);
         trade_data[sym]   = trades;
         trade_counts[sym] = t_count;
     }
  
-    // Remove any symbols that failed to load
     std::vector<std::string> loaded;
     for (const auto& sym : symbols) {
         if (price_data.count(sym) && price_data[sym]) loaded.push_back(sym);
@@ -97,7 +95,6 @@ int main(int argc, char* argv[]) {
         return 1;
     }
  
-    // ── Find total ticks (align across products) ──
     size_t total_ticks = SIZE_MAX;
     for (const auto& sym : symbols) {
         total_ticks = std::min(total_ticks, price_counts[sym]);
@@ -107,17 +104,14 @@ int main(int argc, char* argv[]) {
     Strategy* strategy = nullptr;
     if (strategy_name == "mm" || strategy_name == "market_maker") {
         auto* mm = new MarketMaker();
-        mm->verbose = verbose;
         strategy = mm;
         std::cout << "[Engine] Strategy: MarketMaker" << std::endl;
     } else {
         auto* omni = new OmniImbalance();
-        omni->verbose = verbose;
         strategy = omni;
         std::cout << "[Engine] Strategy: OmniImbalance" << std::endl;
     }
  
-    // ── Print config ──
     std::cout << "[Engine] Products: ";
     for (const auto& sym : symbols) {
         std::cout << sym << "(" << price_counts[sym] << " ticks, limit="
@@ -141,14 +135,17 @@ int main(int argc, char* argv[]) {
  
         for (const auto& sym : symbols) {
             current_books[sym] = price_data[sym][i];
-            lobs[sym].update(current_books[sym]);
  
+            // GATHER TRADES FIRST
             while (trade_ptr[sym] < trade_counts[sym] &&
                    trade_data[sym] != nullptr &&
                    trade_data[sym][trade_ptr[sym]].timestamp <= current_ts) {
                 current_trades[sym].push_back(trade_data[sym][trade_ptr[sym]]);
                 trade_ptr[sym]++;
             }
+
+            // UPDATE LOB WITH TRADES
+            lobs[sym].update(current_books[sym], current_trades[sym]);
         }
  
         strategy->on_tick(current_ts, current_books, current_trades, lobs);
@@ -157,7 +154,6 @@ int main(int argc, char* argv[]) {
     auto t1 = std::chrono::high_resolution_clock::now();
     double elapsed_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
  
-    // ── Results ──────────────────────────────────────────────────────────
     fs::create_directories("../results");
  
     results::print_summary(lobs, elapsed_ms, total_ticks);

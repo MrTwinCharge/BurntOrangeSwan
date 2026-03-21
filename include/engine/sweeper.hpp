@@ -1,3 +1,4 @@
+// include/engine/sweeper.hpp
 #pragma once
 #include "engine/types.hpp"
 #include "engine/lob.hpp"
@@ -10,17 +11,6 @@
 #include <iomanip>
 #include <chrono>
 #include <functional>
-
-/**
- * ParamSweeper — Brute-force parameter optimization.
- *
- * Runs the full tick loop many times with different strategy params.
- * Outputs a CSV: each row is one param combo + resulting PnL.
- * Your C++ engine at 400k ticks/s means 1000 backtests ≈ 25 seconds.
- *
- * Usage: define a StrategyFactory that takes a param vector and returns
- * a configured Strategy*. The sweeper handles the rest.
- */
 
 struct SweepParam {
     std::string name;
@@ -45,18 +35,16 @@ using StrategyFactory = std::function<Strategy*(const std::vector<double>& param
 
 class ParamSweeper {
 public:
-    // Run the sweep
     static std::vector<SweepResult> sweep(
         const std::vector<SweepParam>& param_defs,
         const StrategyFactory& factory,
         const std::vector<std::string>& symbols,
         const std::map<std::string, const OrderBookState*>& price_data,
         const std::map<std::string, const PublicTrade*>& trade_data,
-        const std::map<std::string, size_t>& price_counts,
+        [[maybe_unused]] const std::map<std::string, size_t>& price_counts,
         const std::map<std::string, size_t>& trade_counts,
         size_t total_ticks)
     {
-        // Generate all param combinations
         std::vector<std::vector<double>> combos;
         std::vector<double> current(param_defs.size());
         generate_combos(param_defs, 0, current, combos);
@@ -71,14 +59,12 @@ public:
 
         int done = 0;
         for (const auto& params : combos) {
-            // Create fresh strategy + LOBs for this run
             Strategy* strat = factory(params);
             std::map<std::string, LimitOrderBook> lobs;
             for (const auto& sym : symbols) {
                 lobs[sym] = LimitOrderBook(sym);
             }
 
-            // Run the tick loop
             std::map<std::string, size_t> trade_ptr;
             for (const auto& sym : symbols) trade_ptr[sym] = 0;
 
@@ -90,20 +76,22 @@ public:
 
                 for (const auto& sym : symbols) {
                     books[sym] = price_data.at(sym)[i];
-                    lobs[sym].update(books[sym]);
-
+                    
+                    // GATHER TRADES BEFORE LOB UPDATE
                     while (trade_ptr[sym] < trade_counts.at(sym) &&
                            trade_data.at(sym) != nullptr &&
                            trade_data.at(sym)[trade_ptr[sym]].timestamp <= ts) {
                         trades[sym].push_back(trade_data.at(sym)[trade_ptr[sym]]);
                         trade_ptr[sym]++;
                     }
+
+                    // UPDATE WITH TRADES TO SIMULATE QUEUE DEPLETION
+                    lobs[sym].update(books[sym], trades[sym]);
                 }
 
                 strat->on_tick(ts, books, trades, lobs);
             }
 
-            // Collect result
             SweepResult sr;
             sr.params = params;
             sr.total_pnl = 0;
@@ -133,14 +121,12 @@ public:
         std::cout << "\n[Sweeper] Done in " << std::fixed << std::setprecision(2)
                   << elapsed << "s" << std::endl;
 
-        // Sort by PnL descending
         std::sort(results.begin(), results.end(),
                   [](const auto& a, const auto& b){ return a.total_pnl > b.total_pnl; });
 
         return results;
     }
 
-    // Export results to CSV
     static void export_csv(const std::vector<SweepResult>& results,
                            const std::vector<SweepParam>& param_defs,
                            const std::vector<std::string>& symbols,
@@ -151,13 +137,11 @@ public:
             return;
         }
 
-        // Header
         for (const auto& p : param_defs) f << p.name << ",";
         f << "total_pnl,total_trades,max_drawdown";
         for (const auto& sym : symbols) f << "," << sym << "_pnl";
         f << "\n";
 
-        // Rows
         for (const auto& r : results) {
             for (size_t i = 0; i < r.params.size(); i++) {
                 f << std::fixed << std::setprecision(4) << r.params[i] << ",";
@@ -175,7 +159,6 @@ public:
         std::cout << "[Sweeper] Results exported to: " << filepath << std::endl;
     }
 
-    // Print top N results
     static void print_top(const std::vector<SweepResult>& results,
                           const std::vector<SweepParam>& param_defs,
                           int n = 10) {

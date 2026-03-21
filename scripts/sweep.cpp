@@ -1,3 +1,4 @@
+// scripts/sweep.cpp
 #include <iostream>
 #include <vector>
 #include <map>
@@ -15,6 +16,7 @@
 #include "strategies/market_maker.hpp"
 #include "strategies/mean_reversion.hpp"
 #include "strategies/spread_capture.hpp"
+#include "strategies/fair_value.hpp" // <-- ADDED FAIR VALUE INCLUDE
 
 namespace fs = std::filesystem;
 
@@ -31,31 +33,47 @@ std::vector<StrategyEntry> build_registry() {
     reg.push_back({"omni", "trader_obi.py",
         {{"threshold", 0.05, 0.50, 0.05}, {"order_size", 2, 20, 2}},
         [](const std::vector<double>& p) -> Strategy* {
-            auto* s = new OmniImbalance(); s->default_threshold=p[0]; s->default_size=(int)p[1]; return s;
+            auto* s = new OmniImbalance(); s->default_threshold=p[0]; s->default_size=(int)p[1]; 
+            s->target_symbols = {"TOMATOES"}; // Targets trending assets
+            return s;
         }});
 
     reg.push_back({"mm", "trader_mm.py",
         {{"edge", 0, 5, 1}, {"order_size", 2, 20, 2}},
         [](const std::vector<double>& p) -> Strategy* {
-            auto* s = new MarketMaker(); s->default_edge=(int)p[0]; s->default_order_size=(int)p[1]; return s;
+            auto* s = new MarketMaker(); s->default_edge=(int)p[0]; s->default_order_size=(int)p[1]; 
+            s->target_symbols = {"EMERALDS"}; 
+            return s;
         }});
 
     reg.push_back({"mr", "trader_mr.py",
         {{"ema_alpha", 0.02, 0.20, 0.02}, {"z_threshold", 0.5, 3.0, 0.5}, {"order_size", 2, 10, 2}},
         [](const std::vector<double>& p) -> Strategy* {
-            auto* s = new MeanReversion(); s->ema_alpha=p[0]; s->z_threshold=p[1]; s->order_size=(int)p[2]; return s;
+            auto* s = new MeanReversion(); s->ema_alpha=p[0]; s->z_threshold=p[1]; s->order_size=(int)p[2]; 
+            s->target_symbols = {"EMERALDS"}; 
+            return s;
         }});
 
     reg.push_back({"sc", "trader_sc.py",
         {{"max_pos_frac", 0.2, 0.8, 0.2}, {"order_size", 2, 10, 2}, {"min_spread", 2, 10, 2}},
         [](const std::vector<double>& p) -> Strategy* {
-            auto* s = new SpreadCapture(); s->max_position_frac=p[0]; s->order_size=(int)p[1]; s->min_spread=(int)p[2]; return s;
+            auto* s = new SpreadCapture(); s->max_position_frac=p[0]; s->order_size=(int)p[1]; s->min_spread=(int)p[2]; 
+            s->target_symbols = {"EMERALDS"}; // STRICTLY targets mean-reverting
+            return s;
+        }});
+
+    // <-- ADDED FAIR VALUE REGISTRATION
+    reg.push_back({"fv", "trader_fv.py",
+        {{"threshold", 0.5, 3.0, 0.5}, {"order_size", 2, 20, 2}},
+        [](const std::vector<double>& p) -> Strategy* {
+            auto* s = new FairValue(); s->threshold=p[0]; s->order_size=(int)p[1]; 
+            s->target_symbols = {"TOMATOES"}; // Best for volatile price discovery
+            return s;
         }});
 
     return reg;
 }
 
-// Run full backtest and save results with strategy name in filename
 void run_and_save(const std::string& strat_name, Strategy* strat,
     const std::vector<std::string>& symbols,
     const std::map<std::string,const OrderBookState*>& pd,
@@ -73,22 +91,21 @@ void run_and_save(const std::string& strat_name, Strategy* strat,
         std::map<std::string,std::vector<PublicTrade>> tr;
         for (const auto& s : symbols) {
             bk[s] = pd.at(s)[i];
-            lobs[s].update(bk[s]);
+            
             while (tp[s] < tc.at(s) && td.at(s) && td.at(s)[tp[s]].timestamp <= ts) {
                 tr[s].push_back(td.at(s)[tp[s]]);
                 tp[s]++;
             }
+            lobs[s].update(bk[s], tr[s]);
         }
         strat->on_tick(ts, bk, tr, lobs);
     }
 
-    // Save per-strategy files
     std::string pnl_path = "../results/pnl_" + strat_name + ".csv";
     std::string trades_path = "../results/trades_" + strat_name + ".csv";
     results::export_pnl_csv(lobs, pnl_path);
     results::export_trades_csv(lobs, trades_path);
 
-    // Print summary
     double total = 0;
     int total_trades = 0;
     for (const auto& [sym, lob] : lobs) {
@@ -122,6 +139,9 @@ void generate_trader(const StrategyEntry& entry, const SweepResult& best) {
         std::ostringstream f; f << std::fixed << std::setprecision(2) << best.params[0];
         inject("MAX_POS_FRAC", f.str()); inject("ORDER_SIZE", std::to_string((int)best.params[1]));
         inject("MIN_SPREAD", std::to_string((int)best.params[2]));
+    } else if (entry.name == "fv") { // <-- ADDED FAIR VALUE INJECTION
+        std::ostringstream t; t << std::fixed << std::setprecision(2) << best.params[0];
+        inject("THRESHOLD", t.str()); inject("ORDER_SIZE", std::to_string((int)best.params[1]));
     }
 
     std::ofstream fout("../python/trader.py"); fout << code; fout.close();
@@ -140,20 +160,16 @@ void open_dashboard(const std::vector<std::string>& strat_names) {
     std::string inj = "\n<script>\nconst _i=[\n";
     auto add = [&](const std::string& n, const std::string& c) { if (!c.empty()) inj += "{name:'" + n + "',content:`" + js_esc(c) + "`},\n"; };
 
-    // Winner's results as default pnl.csv / trades.csv
     add("pnl.csv", read_file("../results/pnl_" + strat_names[0] + ".csv"));
     add("trades.csv", read_file("../results/trades_" + strat_names[0] + ".csv"));
 
-    // Per-strategy results
     for (const auto& name : strat_names) {
         add("pnl_" + name + ".csv", read_file("../results/pnl_" + name + ".csv"));
         add("trades_" + name + ".csv", read_file("../results/trades_" + name + ".csv"));
     }
 
-    // Sweep results
     add("sweep.csv", read_file("../results/sweep.csv"));
 
-    // Raw data
     if (fs::exists("../data/raw/")) {
         for (const auto& e : fs::directory_iterator("../data/raw/")) {
             if (e.is_regular_file() && e.path().extension() == ".csv")
@@ -177,7 +193,10 @@ void open_dashboard(const std::vector<std::string>& strat_names) {
     std::string cmd = "command -v explorer.exe>/dev/null 2>&1&&explorer.exe \"$(wslpath -w '" + ap + "')\" 2>/dev/null||"
                       "command -v xdg-open>/dev/null 2>&1&&xdg-open \"" + ap + "\" 2>/dev/null||"
                       "echo '[Vis] Open: " + ap + "'";
-    system(cmd.c_str());
+    
+    if (system(cmd.c_str()) != 0) {
+        // Suppress warn_unused_result
+    }
 }
 
 int main(int argc, char* argv[]) {
@@ -186,7 +205,7 @@ int main(int argc, char* argv[]) {
         std::string a = argv[i];
         if (a == "--no-vis") vis = false;
         else if (a == "--no-gen") gen = false;
-        else if (a == "-h" || a == "--help") { std::cout << "Usage: ./sweep [omni|mm|mr|sc|all] [--no-vis] [--no-gen]\n"; return 0; }
+        else if (a == "-h" || a == "--help") { std::cout << "Usage: ./sweep [omni|mm|mr|sc|fv|all] [--no-vis] [--no-gen]\n"; return 0; }
         else target = a;
     }
 
@@ -247,7 +266,6 @@ int main(int argc, char* argv[]) {
     if (all.empty()) { std::cerr << "No results.\n"; return 1; }
     std::sort(all.begin(), all.end(), [](auto& a, auto& b) { return a.r.total_pnl > b.r.total_pnl; });
 
-    // Print rankings
     std::cout << "\n╔══════════════════════════════════════════════════╗\n"
               << "║  GLOBAL RANKINGS                                ║\n"
               << "╠══════════════════════════════════════════════════╣\n";
@@ -266,7 +284,6 @@ int main(int argc, char* argv[]) {
 
     fs::create_directories("../results");
 
-    // Save sweep CSV
     {
         std::ofstream f("../results/sweep.csv");
         f << "strategy";
@@ -281,7 +298,6 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Run full backtest for EVERY strategy's best params
     std::cout << "[Sweep] Running full backtests for all strategies...\n";
     std::vector<std::string> strat_names;
     for (auto& x : all) {
@@ -291,7 +307,6 @@ int main(int argc, char* argv[]) {
         delete s;
     }
 
-    // Also save winner as default pnl.csv / trades.csv
     {
         auto content = read_file("../results/pnl_" + all[0].name + ".csv");
         std::ofstream f("../results/pnl.csv"); f << content;
@@ -301,14 +316,12 @@ int main(int argc, char* argv[]) {
         std::ofstream f("../results/trades.csv"); f << content;
     }
 
-    // Generate trader.py from winner
     if (gen) {
         for (const auto& e : torun) {
             if (e.name == all[0].name) { std::cout << "\n"; generate_trader(e, all[0].r); break; }
         }
     }
 
-    // Open dashboard with all strategy data embedded
     if (vis) open_dashboard(strat_names);
 
     return 0;
