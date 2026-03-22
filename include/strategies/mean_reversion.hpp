@@ -41,8 +41,6 @@ public:
             }
 
             double mid = book.mid_price();
-            int pos = lob.position;
-            int limit = lob.position_limit;
 
             if (emas[i] == 0.0) {
                 emas[i] = mid;
@@ -53,33 +51,26 @@ public:
 
             double diff = mid - emas[i];
             emas[i] += ema_alpha * diff;
-            variances[i] = ema_alpha * diff * diff + (1.0 - ema_alpha) * variances[i];
+            variances[i] = (1.0 - ema_alpha) * (variances[i] + ema_alpha * diff * diff);
 
             double stddev = std::sqrt(variances[i]);
-            if (stddev < 0.5) {
-                lob.match_orders(orders);
-                continue;
-            }
+            double z_score = (stddev > 0.0) ? (mid - emas[i]) / stddev : 0.0;
+            
+            int pos = lob.position;
 
-            double z_score = (mid - emas[i]) / stddev;
-
-            // Entry signals
-            if (z_score > z_threshold && pos > -limit) {
-                int qty = std::min(order_size, limit + pos);
-                if (qty > 0) orders.push_back({(int32_t)book.bid_price_1, -qty});
+            if (pos > 0 && mid > emas[i] + stddev) { // Long exit
+                int qty = std::min(pos, (int)book.bid_volume_1); // Removed std::abs
+                orders.push_back({(int32_t)book.bid_price_1, -qty});
             }
-            else if (z_score < -z_threshold && pos < limit) {
-                int qty = std::min(order_size, limit - pos);
-                if (qty > 0) orders.push_back({(int32_t)book.ask_price_1, qty});
+            else if (pos < 0 && mid < emas[i] - stddev) { // Short exit
+                int qty = std::min(-pos, (int)book.ask_volume_1); // Removed std::abs
+                orders.push_back({(int32_t)book.ask_price_1, qty});
             }
-
-            // Position unwinding on reversal
-            if (pos > 0 && z_score < 0) {
-                int qty = std::min(pos, (int)std::abs(book.bid_volume_1));
-                if (qty > 0) orders.push_back({(int32_t)book.bid_price_1, -qty});
-            } else if (pos < 0 && z_score > 0) {
-                int qty = std::min(-pos, (int)std::abs(book.ask_volume_1));
-                if (qty > 0) orders.push_back({(int32_t)book.ask_price_1, qty});
+            else if (z_score < -z_threshold) {
+                orders.push_back({(int32_t)book.ask_price_1, order_size}); 
+            } 
+            else if (z_score > z_threshold) {
+                orders.push_back({(int32_t)book.bid_price_1, -order_size}); 
             }
 
             lob.match_orders(orders);

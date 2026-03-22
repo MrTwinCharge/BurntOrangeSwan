@@ -24,7 +24,6 @@ struct StrategyEntry {
     std::string python_template;
     std::vector<SweepParam> params;
     StrategyFactory factory;
-    bool use_bayesian;  // auto-select optimizer
 };
 
 std::vector<StrategyEntry> build_registry() {
@@ -33,80 +32,73 @@ std::vector<StrategyEntry> build_registry() {
     reg.push_back({"omni", "trader_obi.py",
         {{"threshold", 0.05, 0.50, 0.05}, {"order_size", 2, 20, 2}},
         [](const std::vector<double>& p) -> Strategy* {
-            auto* s = new OmniImbalance();
-            s->default_threshold = p[0];
-            s->default_size = (int)p[1];
+            auto* s = new OmniImbalance(); s->default_threshold=p[0]; s->default_size=(int)p[1]; 
+            s->target_symbols = {"TOMATOES"};
             return s;
-        }, false});
+        }});
 
-    // MM: expanded params — edge, order_size
-    // Grid is fine here (6 * 10 = 60 combos)
     reg.push_back({"mm", "trader_mm.py",
-        {{"edge", 0, 5, 1}, {"order_size", 1, 20, 1}},
+        {{"edge", 0, 5, 1}, {"order_size", 2, 20, 2}},
         [](const std::vector<double>& p) -> Strategy* {
-            auto* s = new MarketMaker();
-            s->default_edge = (int)p[0];
-            s->default_order_size = (int)p[1];
+            auto* s = new MarketMaker(); s->default_edge=(int)p[0]; s->default_order_size=(int)p[1]; 
+            s->target_symbols = {"EMERALDS"}; 
             return s;
-        }, false});
+        }});
 
-    // MR: 3 params → bayesian is better
     reg.push_back({"mr", "trader_mr.py",
-        {{"ema_alpha", 0.01, 0.30, 0.01}, {"z_threshold", 0.2, 4.0, 0.1}, {"order_size", 1, 20, 1}},
+        {{"ema_alpha", 0.02, 0.20, 0.02}, {"z_threshold", 0.5, 3.0, 0.5}, {"order_size", 2, 10, 2}},
         [](const std::vector<double>& p) -> Strategy* {
-            auto* s = new MeanReversion();
-            s->ema_alpha = p[0];
-            s->z_threshold = p[1];
-            s->order_size = (int)p[2];
+            auto* s = new MeanReversion(); s->ema_alpha=p[0]; s->z_threshold=p[1]; s->order_size=(int)p[2]; 
+            s->target_symbols = {"EMERALDS"}; 
             return s;
-        }, true});
+        }});
 
-    // SC: 3 params → bayesian
     reg.push_back({"sc", "trader_sc.py",
-        {{"max_pos_frac", 0.1, 0.9, 0.05}, {"order_size", 1, 20, 1}, {"min_spread", 1, 15, 1}},
+        {{"max_pos_frac", 0.2, 0.8, 0.2}, {"order_size", 2, 10, 2}, {"min_spread", 2, 10, 2}},
         [](const std::vector<double>& p) -> Strategy* {
-            auto* s = new SpreadCapture();
-            s->max_position_frac = p[0];
-            s->order_size = (int)p[1];
-            s->min_spread = (int)p[2];
+            auto* s = new SpreadCapture(); s->max_position_frac=p[0]; s->order_size=(int)p[1]; s->min_spread=(int)p[2]; 
+            s->target_symbols = {"EMERALDS"};
             return s;
-        }, true});
+        }});
 
-    // FV: 2 params, grid is fine
     reg.push_back({"fv", "trader_fv.py",
-        {{"threshold", 0.1, 2.0, 0.1}, {"order_size", 1, 20, 1}},
+        {{"threshold", 0.5, 3.0, 0.5}, {"order_size", 2, 20, 2}},
         [](const std::vector<double>& p) -> Strategy* {
-            auto* s = new FairValue();
-            s->threshold = p[0];
-            s->order_size = (int)p[1];
+            auto* s = new FairValue(); s->threshold=p[0]; s->order_size=(int)p[1]; 
+            s->target_symbols = {"TOMATOES"};
             return s;
-        }, false});
+        }});
 
     return reg;
 }
 
 void run_and_save(const std::string& strat_name, Strategy* strat,
     const std::vector<std::string>& symbols,
-    const std::map<std::string, const OrderBookState*>& pd,
-    const std::map<std::string, const PublicTrade*>& td,
-    const std::map<std::string, size_t>& tc, size_t ticks) {
+    const std::map<std::string,const OrderBookState*>& pd,
+    const std::map<std::string,const PublicTrade*>& td,
+    const std::map<std::string,size_t>& tc, size_t ticks) {
 
-    size_t n_sym = symbols.size();
     strat->init(symbols);
-    strat->total_ticks = (int)ticks;
+    size_t num_symbols = symbols.size();
+    
+    std::vector<LimitOrderBook> lobs;
+    std::vector<size_t> tp(num_symbols, 0);
+    std::vector<OrderBookState> bk(num_symbols);
+    std::vector<std::vector<PublicTrade>> tr(num_symbols);
 
-    std::vector<LimitOrderBook> lobs(n_sym);
-    for (size_t s = 0; s < n_sym; s++) lobs[s] = LimitOrderBook(symbols[s]);
-    std::vector<size_t> tp(n_sym, 0);
+    for (size_t s = 0; s < num_symbols; ++s) {
+        lobs.push_back(LimitOrderBook(symbols[s]));
+        tr[s].reserve(20);
+    }
 
     for (size_t i = 0; i < ticks; ++i) {
         uint32_t ts = pd.at(symbols[0])[i].timestamp;
-        std::vector<OrderBookState> bk(n_sym);
-        std::vector<std::vector<PublicTrade>> tr(n_sym);
-        for (size_t s = 0; s < n_sym; s++) {
+        
+        for (size_t s = 0; s < num_symbols; ++s) {
             bk[s] = pd.at(symbols[s])[i];
-            while (tp[s] < tc.at(symbols[s]) && td.at(symbols[s]) &&
-                   td.at(symbols[s])[tp[s]].timestamp <= ts) {
+            tr[s].clear();
+            
+            while (tp[s] < tc.at(symbols[s]) && td.at(symbols[s]) && td.at(symbols[s])[tp[s]].timestamp <= ts) {
                 tr[s].push_back(td.at(symbols[s])[tp[s]]);
                 tp[s]++;
             }
@@ -115,17 +107,21 @@ void run_and_save(const std::string& strat_name, Strategy* strat,
         strat->on_tick(ts, bk, tr, lobs);
     }
 
+    std::map<std::string, LimitOrderBook> out_lobs;
+    for (size_t s = 0; s < num_symbols; ++s) {
+        out_lobs[symbols[s]] = lobs[s];
+    }
+
     std::string pnl_path = "../results/pnl_" + strat_name + ".csv";
     std::string trades_path = "../results/trades_" + strat_name + ".csv";
-    std::map<std::string, LimitOrderBook> lob_map;
-    for (size_t s = 0; s < n_sym; s++) lob_map[symbols[s]] = lobs[s];
-    results::export_pnl_csv(lob_map, pnl_path);
-    results::export_trades_csv(lob_map, trades_path);
+    results::export_pnl_csv(out_lobs, pnl_path);
+    results::export_trades_csv(out_lobs, trades_path);
 
-    double total = 0; int total_trades = 0;
-    for (size_t s = 0; s < n_sym; s++) {
-        total += lobs[s].result.total_pnl;
-        total_trades += lobs[s].result.total_buys + lobs[s].result.total_sells;
+    double total = 0;
+    int total_trades = 0;
+    for (const auto& [sym, lob] : out_lobs) {
+        total += lob.result.total_pnl;
+        total_trades += lob.result.total_buys + lob.result.total_sells;
     }
     std::cout << "  [" << strat_name << "] PnL: " << std::fixed << std::setprecision(2) << total
               << "  Trades: " << total_trades << "\n";
@@ -143,26 +139,20 @@ void generate_trader(const StrategyEntry& entry, const SweepResult& best) {
 
     if (entry.name == "omni") {
         std::ostringstream t; t << std::fixed << std::setprecision(2) << best.params[0];
-        inject("THRESHOLD", t.str());
-        inject("ORDER_SIZE", std::to_string((int)best.params[1]));
+        inject("THRESHOLD", t.str()); inject("ORDER_SIZE", std::to_string((int)best.params[1]));
     } else if (entry.name == "mm") {
-        inject("EDGE", std::to_string((int)best.params[0]));
-        inject("ORDER_SIZE", std::to_string((int)best.params[1]));
+        inject("EDGE", std::to_string((int)best.params[0])); inject("ORDER_SIZE", std::to_string((int)best.params[1]));
     } else if (entry.name == "mr") {
         std::ostringstream a; a << std::fixed << std::setprecision(2) << best.params[0];
         std::ostringstream z; z << std::fixed << std::setprecision(2) << best.params[1];
-        inject("EMA_ALPHA", a.str());
-        inject("Z_THRESHOLD", z.str());
-        inject("ORDER_SIZE", std::to_string((int)best.params[2]));
+        inject("EMA_ALPHA", a.str()); inject("Z_THRESHOLD", z.str()); inject("ORDER_SIZE", std::to_string((int)best.params[2]));
     } else if (entry.name == "sc") {
         std::ostringstream f; f << std::fixed << std::setprecision(2) << best.params[0];
-        inject("MAX_POS_FRAC", f.str());
-        inject("ORDER_SIZE", std::to_string((int)best.params[1]));
+        inject("MAX_POS_FRAC", f.str()); inject("ORDER_SIZE", std::to_string((int)best.params[1]));
         inject("MIN_SPREAD", std::to_string((int)best.params[2]));
-    } else if (entry.name == "fv") {
+    } else if (entry.name == "fv") { 
         std::ostringstream t; t << std::fixed << std::setprecision(2) << best.params[0];
-        inject("THRESHOLD", t.str());
-        inject("ORDER_SIZE", std::to_string((int)best.params[1]));
+        inject("THRESHOLD", t.str()); inject("ORDER_SIZE", std::to_string((int)best.params[1]));
     }
 
     std::ofstream fout("../python/trader.py"); fout << code; fout.close();
@@ -177,55 +167,57 @@ static std::string js_esc(const std::string& s) { std::string o; o.reserve(s.siz
 void open_dashboard(const std::vector<std::string>& strat_names) {
     std::string v = read_file("../tools/visualizer.html");
     if (v.empty()) { std::cerr << "[Vis] No visualizer.html\n"; return; }
+
     std::string inj = "\n<script>\nconst _i=[\n";
     auto add = [&](const std::string& n, const std::string& c) { if (!c.empty()) inj += "{name:'" + n + "',content:`" + js_esc(c) + "`},\n"; };
+
     add("pnl.csv", read_file("../results/pnl_" + strat_names[0] + ".csv"));
     add("trades.csv", read_file("../results/trades_" + strat_names[0] + ".csv"));
+
     for (const auto& name : strat_names) {
         add("pnl_" + name + ".csv", read_file("../results/pnl_" + name + ".csv"));
         add("trades_" + name + ".csv", read_file("../results/trades_" + name + ".csv"));
     }
+
     add("sweep.csv", read_file("../results/sweep.csv"));
+
     if (fs::exists("../data/raw/")) {
         for (const auto& e : fs::directory_iterator("../data/raw/")) {
             if (e.is_regular_file() && e.path().extension() == ".csv")
                 add(e.path().filename().string(), read_file(e.path().string()));
         }
     }
-    inj += "];\nwindow.addEventListener('DOMContentLoaded',()=>{"
+
+    inj += "];\n";
+    inj += "window.addEventListener('DOMContentLoaded',()=>{"
            "const f=_i.map(x=>new File([new Blob([x.content],{type:'text/csv'})],x.name,{type:'text/csv'}));"
-           "setTimeout(()=>{if(typeof handleFiles==='function')handleFiles(f);},100);});\n</script>\n";
+           "setTimeout(()=>{if(typeof handleFiles==='function')handleFiles(f);},100);});\n";
+    inj += "</script>\n";
+
     std::string out = v;
     auto p = out.rfind("</body>");
-    if (p != std::string::npos) out.insert(p, inj); else out += inj;
+    if (p != std::string::npos) out.insert(p, inj);
+    else out += inj;
+
     std::ofstream f("../results/dashboard.html"); f << out; f.close();
     std::string ap = fs::absolute("../results/dashboard.html").string();
     std::string cmd = "command -v explorer.exe>/dev/null 2>&1&&explorer.exe \"$(wslpath -w '" + ap + "')\" 2>/dev/null||"
                       "command -v xdg-open>/dev/null 2>&1&&xdg-open \"" + ap + "\" 2>/dev/null||"
                       "echo '[Vis] Open: " + ap + "'";
-    system(cmd.c_str());
+    
+    // FIX: Acknowledged system command output to silence the GCC warning
+    if (system(cmd.c_str()) != 0) {
+        // Do nothing, just suppressing the warning
+    }
 }
 
 int main(int argc, char* argv[]) {
-    std::string target = "all";
-    bool vis = true, gen = true, force_bayesian = false, force_grid = false, sharpe_mode = false;
-
+    std::string target = "all"; bool vis = true, gen = true;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         if (a == "--no-vis") vis = false;
         else if (a == "--no-gen") gen = false;
-        else if (a == "--bayesian" || a == "-b") force_bayesian = true;
-        else if (a == "--grid" || a == "-g") force_grid = true;
-        else if (a == "--sharpe") sharpe_mode = true;
-        else if (a == "-h" || a == "--help") {
-            std::cout << "Usage: ./sweep [strategy|all] [options]\n"
-                      << "  --bayesian, -b   Force Bayesian optimization for all strategies\n"
-                      << "  --grid, -g       Force grid search for all strategies\n"
-                      << "  --sharpe         Optimize Sharpe ratio instead of raw PnL\n"
-                      << "  --no-vis         Skip dashboard\n"
-                      << "  --no-gen         Skip trader.py generation\n";
-            return 0;
-        }
+        else if (a == "-h" || a == "--help") { std::cout << "Usage: ./sweep [omni|mm|mr|sc|fv|all] [--no-vis] [--no-gen]\n"; return 0; }
         else target = a;
     }
 
@@ -242,16 +234,16 @@ int main(int argc, char* argv[]) {
     std::sort(sym.begin(), sym.end());
     if (sym.empty()) { std::cerr << "No data.\n"; return 1; }
 
-    std::map<std::string, const OrderBookState*> pd;
-    std::map<std::string, const PublicTrade*> td;
-    std::map<std::string, size_t> pc, tc;
+    std::map<std::string,const OrderBookState*> pd;
+    std::map<std::string,const PublicTrade*> td;
+    std::map<std::string,size_t> tc;
     size_t ticks = SIZE_MAX;
     for (const auto& s : sym) {
         size_t a = 0, b = 0;
         auto* p = load_price_data(bd + s + "_prices.bin", a);
         auto* t = load_trade_data(bd + s + "_trades.bin", b);
         if (!p || a == 0) continue;
-        pd[s] = p; pc[s] = a; td[s] = t; tc[s] = b;
+        pd[s] = p; td[s] = t; tc[s] = b;
         ticks = std::min(ticks, a);
     }
 
@@ -277,17 +269,9 @@ int main(int argc, char* argv[]) {
     for (const auto& e : torun) {
         std::cout << "══════════════════════════════════════════\n  Sweeping: " << e.name
                   << "\n══════════════════════════════════════════\n\n";
-
-        bool use_bayes = force_bayesian || (!force_grid && e.use_bayesian);
-
-        std::vector<SweepResult> res;
-        if (use_bayes) {
-            res = ParamSweeper::bayesian_optimize(e.params, e.factory, sym, pd, td, tc, ticks,
-                                                   20, 80, sharpe_mode);
-        } else {
-            res = ParamSweeper::sweep(e.params, e.factory, sym, pd, td, pc, tc, ticks);
-        }
-
+                  
+        auto res = ParamSweeper::sweep(e.params, e.factory, sym, pd, td, tc, ticks);
+        
         ParamSweeper::print_top(res, e.params, 5);
         std::cout << "\n";
         if (!res.empty()) all.push_back({e.name, e.python_template, res[0], e.params, e.factory});
@@ -296,14 +280,13 @@ int main(int argc, char* argv[]) {
     if (all.empty()) { std::cerr << "No results.\n"; return 1; }
     std::sort(all.begin(), all.end(), [](auto& a, auto& b) { return a.r.total_pnl > b.r.total_pnl; });
 
-    std::cout << "\n╔══════════════════════════════════════════════════════════════╗\n"
-              << "║  GLOBAL RANKINGS                                            ║\n"
-              << "╠══════════════════════════════════════════════════════════════╣\n";
+    std::cout << "\n╔══════════════════════════════════════════════════╗\n"
+              << "║  GLOBAL RANKINGS                                 ║\n"
+              << "╠══════════════════════════════════════════════════╣\n";
     for (size_t i = 0; i < all.size(); i++) {
         auto& x = all[i];
         std::cout << "║ " << (i == 0 ? ">>>" : "   ") << " " << std::left << std::setw(6) << x.name
-                  << "  PnL:" << std::right << std::setw(10) << std::fixed << std::setprecision(2) << x.r.total_pnl
-                  << "  Sharpe:" << std::setw(6) << std::setprecision(3) << x.r.sharpe
+                  << "  PnL:" << std::right << std::setw(12) << std::fixed << std::setprecision(2) << x.r.total_pnl
                   << "  Trades:" << std::setw(6) << x.r.total_trades << "  [";
         for (size_t j = 0; j < x.p.size(); j++) {
             if (j) std::cout << ",";
@@ -311,7 +294,7 @@ int main(int argc, char* argv[]) {
         }
         std::cout << "]" << (i == 0 ? " <- WINNER" : "") << "\n";
     }
-    std::cout << "╚══════════════════════════════════════════════════════════════╝\n\n";
+    std::cout << "╚══════════════════════════════════════════════════╝\n\n";
 
     fs::create_directories("../results");
 
@@ -321,12 +304,11 @@ int main(int argc, char* argv[]) {
         size_t mp = 0;
         for (auto& x : all) mp = std::max(mp, x.p.size());
         for (size_t i = 0; i < mp; i++) f << ",param_" << i;
-        f << ",total_pnl,total_trades,max_drawdown,sharpe\n";
+        f << ",total_pnl,total_trades,max_drawdown\n";
         for (auto& x : all) {
             f << x.name;
             for (size_t i = 0; i < mp; i++) { f << ","; if (i < x.r.params.size()) f << std::fixed << std::setprecision(4) << x.r.params[i]; }
-            f << "," << std::fixed << std::setprecision(2) << x.r.total_pnl << "," << x.r.total_trades
-              << "," << x.r.max_drawdown << "," << std::setprecision(4) << x.r.sharpe << "\n";
+            f << "," << std::fixed << std::setprecision(2) << x.r.total_pnl << "," << x.r.total_trades << "," << x.r.max_drawdown << "\n";
         }
     }
 
@@ -339,14 +321,22 @@ int main(int argc, char* argv[]) {
         delete s;
     }
 
-    { auto c = read_file("../results/pnl_" + all[0].name + ".csv"); std::ofstream f("../results/pnl.csv"); f << c; }
-    { auto c = read_file("../results/trades_" + all[0].name + ".csv"); std::ofstream f("../results/trades.csv"); f << c; }
+    {
+        auto content = read_file("../results/pnl_" + all[0].name + ".csv");
+        std::ofstream f("../results/pnl.csv"); f << content;
+    }
+    {
+        auto content = read_file("../results/trades_" + all[0].name + ".csv");
+        std::ofstream f("../results/trades.csv"); f << content;
+    }
 
     if (gen) {
         for (const auto& e : torun) {
             if (e.name == all[0].name) { std::cout << "\n"; generate_trader(e, all[0].r); break; }
         }
     }
+
     if (vis) open_dashboard(strat_names);
+
     return 0;
 }
