@@ -3,9 +3,8 @@ from typing import Dict, List, Tuple
 
 
 class Trader:
-    MAX_POS_FRAC = 0.80
-    ORDER_SIZE = 8
-    MIN_SPREAD = 6
+    EDGE = 5
+    ORDER_SIZE = 20
     LIMIT = 50
     TOTAL_TICKS = 2000
     FLATTEN_PCT = 0.90
@@ -32,66 +31,58 @@ class Trader:
 
             best_bid = max(od.buy_orders.keys())
             best_ask = min(od.sell_orders.keys())
-            spread = best_ask - best_bid
-            max_pos = int(self.LIMIT * self.MAX_POS_FRAC)
+
+            bv = od.buy_orders[best_bid]
+            av = abs(od.sell_orders[best_ask])
+            fair = round((best_bid * av + best_ask * bv) / (bv + av)) if bv + av > 0 else round((best_bid + best_ask) / 2.0)
 
             if flattening:
-                # FLATTEN MODE
                 if pos > 0:
                     qty = min(pos, self.ORDER_SIZE)
                     if urgent:
                         orders.append(Order(product, best_bid, -qty))
                     else:
-                        orders.append(Order(product, best_ask - 1, -qty))
+                        ask_price = max(int(fair), best_ask)
+                        orders.append(Order(product, ask_price, -qty))
                 elif pos < 0:
                     qty = min(-pos, self.ORDER_SIZE)
                     if urgent:
                         orders.append(Order(product, best_ask, qty))
                     else:
-                        orders.append(Order(product, best_bid + 1, qty))
+                        bid_price = min(int(fair), best_bid)
+                        orders.append(Order(product, bid_price, qty))
             else:
-                # NORMAL MODE
-                if spread < self.MIN_SPREAD:
-                    result[product] = orders
-                    continue
+                # Aggressive: take mispriced levels
+                for ask_price in sorted(od.sell_orders.keys()):
+                    if fair - ask_price >= self.EDGE and pos < self.LIMIT:
+                        qty = min(abs(od.sell_orders[ask_price]), self.ORDER_SIZE, self.LIMIT - pos)
+                        if qty > 0:
+                            orders.append(Order(product, ask_price, qty))
+                            pos += qty
 
-                # Quote INSIDE the spread for queue priority
-                our_bid = best_bid + 1
-                our_ask = best_ask - 1
+                for bid_price in sorted(od.buy_orders.keys(), reverse=True):
+                    if bid_price - fair >= self.EDGE and pos > -self.LIMIT:
+                        qty = min(od.buy_orders[bid_price], self.ORDER_SIZE, self.LIMIT + pos)
+                        if qty > 0:
+                            orders.append(Order(product, bid_price, -qty))
+                            pos -= qty
 
-                if our_ask - our_bid < 2:
-                    result[product] = orders
-                    continue
+                # Passive quotes at fair ± (edge + 1)
+                bid_price = int(fair) - self.EDGE - 1
+                ask_price = int(fair) + self.EDGE + 1
 
-                # Skew quotes to flatten position
-                if pos > max_pos // 2:
-                    our_ask -= 1
-                    our_bid -= 1
-                elif pos < -max_pos // 2:
-                    our_ask += 1
-                    our_bid += 1
+                if pos > self.LIMIT // 2:
+                    ask_price -= 1
+                elif pos < -self.LIMIT // 2:
+                    bid_price += 1
 
-                # Passive quotes inside spread
-                if pos < max_pos:
-                    qty = min(self.ORDER_SIZE, max_pos - pos)
-                    if qty > 0:
-                        orders.append(Order(product, our_bid, qty))
+                buy_qty = min(self.ORDER_SIZE, self.LIMIT - pos)
+                sell_qty = min(self.ORDER_SIZE, self.LIMIT + pos)
 
-                if pos > -max_pos:
-                    qty = min(self.ORDER_SIZE, max_pos + pos)
-                    if qty > 0:
-                        orders.append(Order(product, our_ask, -qty))
-
-                # Aggressive take if mispriced
-                mid = (best_bid + best_ask) / 2.0
-                if best_ask < mid and pos < max_pos:
-                    qty = min(abs(od.sell_orders[best_ask]), max_pos - pos)
-                    if qty > 0:
-                        orders.append(Order(product, best_ask, qty))
-                if best_bid > mid and pos > -max_pos:
-                    qty = min(od.buy_orders[best_bid], max_pos + pos)
-                    if qty > 0:
-                        orders.append(Order(product, best_bid, -qty))
+                if buy_qty > 0 and bid_price >= best_bid:
+                    orders.append(Order(product, bid_price, buy_qty))
+                if sell_qty > 0 and ask_price <= best_ask:
+                    orders.append(Order(product, ask_price, -sell_qty))
 
             result[product] = orders
 
