@@ -43,9 +43,6 @@ public:
             target_bid = std::min(target_bid, (int32_t)book.bid_price_1);
             target_ask = std::max(target_ask, (int32_t)book.ask_price_1);
 
-            double bv = book.bid_volume_1; // Removed std::abs
-            double av = book.ask_volume_1; // Removed std::abs
-
             if (target_bid != current_bids[i] || target_ask != current_asks[i] || lob.position != last_positions[i]) {
                 
                 lob.cancel_all_resting();

@@ -236,14 +236,15 @@ int main(int argc, char* argv[]) {
 
     std::map<std::string,const OrderBookState*> pd;
     std::map<std::string,const PublicTrade*> td;
-    std::map<std::string,size_t> tc;
+    // 🚀 FIX 1: Restored the pc map so it matches your sweeper.hpp signature
+    std::map<std::string,size_t> pc, tc; 
     size_t ticks = SIZE_MAX;
     for (const auto& s : sym) {
         size_t a = 0, b = 0;
         auto* p = load_price_data(bd + s + "_prices.bin", a);
         auto* t = load_trade_data(bd + s + "_trades.bin", b);
         if (!p || a == 0) continue;
-        pd[s] = p; td[s] = t; tc[s] = b;
+        pd[s] = p; pc[s] = a; td[s] = t; tc[s] = b; // Populated pc here
         ticks = std::min(ticks, a);
     }
 
@@ -270,11 +271,22 @@ int main(int argc, char* argv[]) {
         std::cout << "══════════════════════════════════════════\n  Sweeping: " << e.name
                   << "\n══════════════════════════════════════════\n\n";
                   
-        auto res = ParamSweeper::sweep(e.params, e.factory, sym, pd, td, tc, ticks);
+        // 🚀 FIX 2: Passed the pc map into the sweep function
+        auto res = ParamSweeper::sweep(e.params, e.factory, sym, pd, td, pc, tc, ticks);
         
         ParamSweeper::print_top(res, e.params, 5);
         std::cout << "\n";
-        if (!res.empty()) all.push_back({e.name, e.python_template, res[0], e.params, e.factory});
+        
+        // 🚀 FIX 3: Explicit struct initialization to fix the brace-enclosed push_back error
+        if (!res.empty()) {
+            Best b;
+            b.name = e.name;
+            b.tmpl = e.python_template;
+            b.r = res[0];
+            b.p = e.params;
+            b.f = e.factory;
+            all.push_back(b);
+        }
     }
 
     if (all.empty()) { std::cerr << "No results.\n"; return 1; }

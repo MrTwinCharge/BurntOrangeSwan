@@ -34,9 +34,6 @@ public:
             double wmid = book.weighted_mid();
             double mid  = book.mid_price();
             double drift = (wmid - mid) / std::max(mid, 1.0);
-            
-            double bid_vol = book.bid_volume_1; // Removed std::abs
-            double ask_vol = book.ask_volume_1; // Removed std::abs
  
             if (imbalance > default_threshold || drift > 0.0002) {
                 orders.push_back({(int32_t)book.ask_price_1, default_size});

@@ -3,9 +3,9 @@ from typing import Dict, List, Tuple
 
 
 class Trader:
-    MAX_POS_FRAC = 0.90
-    ORDER_SIZE = 16
-    MIN_SPREAD = 10
+    MAX_POS_FRAC = 0.80
+    ORDER_SIZE = 8
+    MIN_SPREAD = 6
     LIMIT = 50
     TOTAL_TICKS = 2000
     FLATTEN_PCT = 0.90
