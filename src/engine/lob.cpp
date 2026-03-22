@@ -160,12 +160,17 @@ void LimitOrderBook::update(const OrderBookState& state, const std::vector<Publi
     // ═══ 1. LATENCY: Pending cancels and orders from LAST tick arrive now ═══
     if (cancel_requested) {
         resting_orders.clear();
+        resting_ages.clear();
         cancel_requested = false;
     }
+
+    // Age all existing resting orders
+    for (auto& age : resting_ages) age++;
 
     if (!pending_orders.empty()) {
         for (auto& order : pending_orders) {
             resting_orders.push_back(order);
+            resting_ages.push_back(0); // fresh order, age = 0
         }
         pending_orders.clear();
     }
@@ -219,16 +224,27 @@ void LimitOrderBook::update(const OrderBookState& state, const std::vector<Publi
     }
 
     // ═══ 3. STOCHASTIC PASSIVE FILLS ═══
+    // Fill probability decays with order age. Fresh orders (just placed) get
+    // full probability. Orders resting for many ticks get penalized because
+    // they're buried behind newer arrivals in the queue.
+    // Calibrated from real exchange: SC (cancel/replace every tick) gets ~2x
+    // more fills than MM (keep orders resting) despite similar strategies.
     std::uniform_real_distribution<double> prob_dist(0.0, 1.0);
     std::uniform_int_distribution<int> size_dist(min_fill_size, std::max(min_fill_size, max_fill_size));
 
-    for (auto& order : resting_orders) {
+    for (size_t idx = 0; idx < resting_orders.size(); idx++) {
+        auto& order = resting_orders[idx];
         if (order.quantity == 0) continue;
+        if (std::abs(order.quantity) < 3) continue;
+
+        // Age decay: fresh orders get 100% of base prob, halves every 5 ticks
+        int age = (idx < resting_ages.size()) ? resting_ages[idx] : 0;
+        double age_decay = 1.0 / (1.0 + age / 5.0);
 
         if (order.is_buy()) {
             if (state.ask_price_1 > 0 && order.price >= (int32_t)state.ask_price_1) continue;
 
-            if (prob_dist(rng) < passive_fill_prob_buy) {
+            if (prob_dist(rng) < passive_fill_prob_buy * age_decay) {
                 int max_can_buy = position_limit - position;
                 if (max_can_buy <= 0) continue;
                 int bot_qty = size_dist(rng);
@@ -242,7 +258,7 @@ void LimitOrderBook::update(const OrderBookState& state, const std::vector<Publi
         else if (order.is_sell()) {
             if (state.bid_price_1 > 0 && order.price <= (int32_t)state.bid_price_1) continue;
 
-            if (prob_dist(rng) < passive_fill_prob_sell) {
+            if (prob_dist(rng) < passive_fill_prob_sell * age_decay) {
                 int max_can_sell = position_limit + position;
                 if (max_can_sell <= 0) continue;
                 int bot_qty = size_dist(rng);
@@ -256,11 +272,14 @@ void LimitOrderBook::update(const OrderBookState& state, const std::vector<Publi
     }
 
     // ═══ 4. CLEANUP ═══
-    resting_orders.erase(
-        std::remove_if(resting_orders.begin(), resting_orders.end(),
-            [](const StrategyOrder& o) { return o.quantity == 0; }),
-        resting_orders.end()
-    );
+    // Remove filled orders and sync age tracking
+    for (size_t i = resting_orders.size(); i > 0; i--) {
+        if (resting_orders[i-1].quantity == 0) {
+            resting_orders.erase(resting_orders.begin() + (i-1));
+            if (i-1 < resting_ages.size())
+                resting_ages.erase(resting_ages.begin() + (i-1));
+        }
+    }
 
     // ═══ 5. MARK-TO-MARKET ═══
     double mid = current_state.mid_price();

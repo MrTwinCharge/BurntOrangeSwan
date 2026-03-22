@@ -41,6 +41,8 @@ public:
             }
 
             double mid = book.mid_price();
+            int pos = lob.position;
+            int limit = lob.position_limit;
 
             if (emas[i] == 0.0) {
                 emas[i] = mid;
@@ -51,15 +53,33 @@ public:
 
             double diff = mid - emas[i];
             emas[i] += ema_alpha * diff;
-            variances[i] = (1.0 - ema_alpha) * (variances[i] + ema_alpha * diff * diff);
+            variances[i] = ema_alpha * diff * diff + (1.0 - ema_alpha) * variances[i];
 
             double stddev = std::sqrt(variances[i]);
-            double z_score = (stddev > 0.0) ? (mid - emas[i]) / stddev : 0.0;
+            if (stddev < 0.5) {
+                lob.match_orders(orders);
+                continue;
+            }
 
-            if (z_score < -z_threshold) {
-                orders.push_back({(int32_t)book.ask_price_1, order_size}); 
-            } else if (z_score > z_threshold) {
-                orders.push_back({(int32_t)book.bid_price_1, -order_size}); 
+            double z_score = (mid - emas[i]) / stddev;
+
+            // Entry signals
+            if (z_score > z_threshold && pos > -limit) {
+                int qty = std::min(order_size, limit + pos);
+                if (qty > 0) orders.push_back({(int32_t)book.bid_price_1, -qty});
+            }
+            else if (z_score < -z_threshold && pos < limit) {
+                int qty = std::min(order_size, limit - pos);
+                if (qty > 0) orders.push_back({(int32_t)book.ask_price_1, qty});
+            }
+
+            // Position unwinding on reversal
+            if (pos > 0 && z_score < 0) {
+                int qty = std::min(pos, (int)std::abs(book.bid_volume_1));
+                if (qty > 0) orders.push_back({(int32_t)book.bid_price_1, -qty});
+            } else if (pos < 0 && z_score > 0) {
+                int qty = std::min(-pos, (int)std::abs(book.ask_volume_1));
+                if (qty > 0) orders.push_back({(int32_t)book.ask_price_1, qty});
             }
 
             lob.match_orders(orders);

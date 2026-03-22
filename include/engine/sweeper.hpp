@@ -168,6 +168,7 @@ public:
         size_t n_sym = symbols.size();
         Strategy* strat = factory(params);
         strat->init(symbols);
+        strat->total_ticks = (int)total_ticks;
 
         std::vector<LimitOrderBook> lobs(n_sym);
         for (size_t s = 0; s < n_sym; s++) lobs[s] = LimitOrderBook(symbols[s]);

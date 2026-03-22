@@ -93,6 +93,7 @@ void run_and_save(const std::string& strat_name, Strategy* strat,
 
     size_t n_sym = symbols.size();
     strat->init(symbols);
+    strat->total_ticks = (int)ticks;
 
     std::vector<LimitOrderBook> lobs(n_sym);
     for (size_t s = 0; s < n_sym; s++) lobs[s] = LimitOrderBook(symbols[s]);

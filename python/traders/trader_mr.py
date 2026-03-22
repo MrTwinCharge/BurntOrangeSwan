@@ -17,7 +17,6 @@ class Trader:
     def run(self, state: TradingState) -> Tuple[Dict[str, List[Order]], int, str]:
         result: Dict[str, List[Order]] = {}
 
-        # Restore state
         if state.traderData:
             saved = jsonpickle.decode(state.traderData)
             self.ema = saved.get("ema", {})
@@ -41,9 +40,8 @@ class Trader:
                 result[product] = orders
                 continue
 
-            prev = self.ema[product]
-            self.ema[product] = self.EMA_ALPHA * mid + (1 - self.EMA_ALPHA) * prev
             diff = mid - self.ema[product]
+            self.ema[product] += self.EMA_ALPHA * diff
             self.ema_var[product] = self.EMA_ALPHA * diff * diff + (1 - self.EMA_ALPHA) * self.ema_var[product]
 
             std = math.sqrt(self.ema_var[product])
@@ -53,16 +51,17 @@ class Trader:
 
             z = (mid - self.ema[product]) / std
 
+            # Entry signals
             if z > self.Z_THRESHOLD and pos > -self.LIMIT:
                 qty = min(self.ORDER_SIZE, self.LIMIT + pos)
                 if qty > 0:
                     orders.append(Order(product, best_bid, -qty))
-
             elif z < -self.Z_THRESHOLD and pos < self.LIMIT:
                 qty = min(self.ORDER_SIZE, self.LIMIT - pos)
                 if qty > 0:
                     orders.append(Order(product, best_ask, qty))
 
+            # Position unwinding on reversal
             if pos > 0 and z < 0:
                 qty = min(pos, abs(od.buy_orders.get(best_bid, 0)))
                 if qty > 0:

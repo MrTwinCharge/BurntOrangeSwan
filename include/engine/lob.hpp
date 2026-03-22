@@ -30,6 +30,7 @@ public:
     ProductResult result;
 
     std::vector<StrategyOrder> resting_orders;
+    std::vector<int> resting_ages;  // parallel to resting_orders, tracks ticks since placement
     std::vector<StrategyOrder> pending_orders;
     bool cancel_requested = false;
     OrderBookState current_state;

@@ -7,7 +7,7 @@ private:
     std::vector<StrategyOrder> orders;
 
 public:
-    double threshold = 0.5; 
+    double threshold = 0.5;
     int order_size = 10;
 
     void on_tick([[maybe_unused]] uint32_t timestamp,
@@ -29,14 +29,18 @@ public:
                 continue;
             }
 
-            double fair_value = book.weighted_mid();
+            int pos = lob.position;
+            int limit = lob.position_limit;
             double mid = book.mid_price();
+            double fair = book.weighted_mid();
 
-            if (fair_value - mid > threshold) {
-                orders.push_back({(int32_t)book.ask_price_1, order_size});
+            if (fair - mid > threshold && pos < limit) {
+                int qty = std::min(order_size, limit - pos);
+                if (qty > 0) orders.push_back({(int32_t)book.ask_price_1, qty});
             }
-            else if (mid - fair_value > threshold) {
-                orders.push_back({(int32_t)book.bid_price_1, -order_size});
+            else if (mid - fair > threshold && pos > -limit) {
+                int qty = std::min(order_size, limit + pos);
+                if (qty > 0) orders.push_back({(int32_t)book.bid_price_1, -qty});
             }
 
             lob.match_orders(orders);

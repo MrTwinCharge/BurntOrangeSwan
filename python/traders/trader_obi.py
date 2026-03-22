@@ -18,22 +18,22 @@ class Trader:
                 result[product] = orders
                 continue
 
-            bid_vol = sum(od.buy_orders.values())
-            ask_vol = sum(abs(v) for v in od.sell_orders.values())
+            best_bid = max(od.buy_orders.keys())
+            best_ask = min(od.sell_orders.keys())
+
+            bid_vol = od.buy_orders[best_bid]
+            ask_vol = abs(od.sell_orders[best_ask])
             total = bid_vol + ask_vol
             if total == 0:
                 result[product] = orders
                 continue
 
             imbalance = (bid_vol - ask_vol) / total
-            best_ask = min(od.sell_orders.keys())
-            best_bid = max(od.buy_orders.keys())
 
             if imbalance > self.THRESHOLD and pos < self.LIMIT:
                 qty = min(self.ORDER_SIZE, self.LIMIT - pos)
                 if qty > 0:
                     orders.append(Order(product, best_ask, qty))
-
             elif imbalance < -self.THRESHOLD and pos > -self.LIMIT:
                 qty = min(self.ORDER_SIZE, self.LIMIT + pos)
                 if qty > 0:
