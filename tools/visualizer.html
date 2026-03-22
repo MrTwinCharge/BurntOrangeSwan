@@ -3,397 +3,356 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BurntOrangeSwan</title>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<title>BurntOrangeSwan Quant Terminal</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
 <style>
-*{margin:0;padding:0;box-sizing:border-box}
-:root{
-  --bg:#0a0e14;--bg2:#0f1419;--bg3:#1a1f2e;--bg4:#242b3d;
-  --fg:#d4d4d8;--fg2:#71717a;--fg3:#52525b;
-  --orange:#e8713a;--orange2:#f59e0b;--green:#22c55e;--red:#ef4444;
-  --blue:#3b82f6;--purple:#a78bfa;--teal:#2dd4bf;
-  --mono:'JetBrains Mono',monospace;--sans:'DM Sans',sans-serif;
-  --radius:6px;
-}
-body{font-family:var(--sans);background:var(--bg);color:var(--fg);font-size:14px;line-height:1.5}
-.hdr{padding:20px 28px;display:flex;align-items:baseline;gap:12px;border-bottom:1px solid var(--bg3)}
-.hdr h1{font-family:var(--mono);font-size:18px;font-weight:700;color:var(--orange)}
-.hdr .sub{color:var(--fg2);font-size:13px}
-.ctrl{padding:14px 28px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--bg3);background:var(--bg2)}
-.ctrl label{font-size:12px;color:var(--fg2);font-weight:500;text-transform:uppercase;letter-spacing:.5px}
-.ctrl select{background:var(--bg3);border:1px solid var(--bg4);color:var(--fg);padding:6px 12px;border-radius:var(--radius);font-family:var(--mono);font-size:13px;cursor:pointer}
-.ctrl select:focus{outline:none;border-color:var(--orange)}
-.drop{margin:24px 28px;border:2px dashed var(--bg4);border-radius:12px;padding:48px 24px;text-align:center;transition:all .2s}
-.drop.over{border-color:var(--orange)}
-.drop h2{font-family:var(--mono);font-size:16px;color:var(--fg);margin-bottom:8px}
-.drop p{color:var(--fg2);font-size:13px;margin:4px 0}
-.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;padding:16px 28px}
-.stat{background:var(--bg2);border-radius:var(--radius);padding:14px 16px;border-left:3px solid var(--bg4);transition:border-color .2s}
-.stat.up{border-left-color:var(--green)}.stat.down{border-left-color:var(--red)}.stat.flat{border-left-color:var(--blue)}
-.stat .v{font-family:var(--mono);font-size:22px;font-weight:700;margin-bottom:2px}
-.stat .l{font-size:11px;color:var(--fg2);text-transform:uppercase;letter-spacing:.5px}
-.stat .hint{font-size:11px;color:var(--fg3);margin-top:4px;font-style:italic}
-.panels{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--bg3);margin-top:1px}
-.panels>div{background:var(--bg);padding:16px 20px}
-.panels .full{grid-column:1/-1}
-.ptitle{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:var(--fg3);margin-bottom:4px}
-.pinfo{font-size:12px;color:var(--fg2);margin-bottom:10px;line-height:1.5}
-canvas{width:100%!important;height:240px!important}
-.fills{max-height:220px;overflow-y:auto}
-.fills table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px}
-.fills th{text-align:left;color:var(--fg3);font-weight:500;padding:6px 10px;border-bottom:1px solid var(--bg3);position:sticky;top:0;background:var(--bg)}
-.fills td{padding:5px 10px;border-bottom:1px solid var(--bg2)}
-.fills .buy{color:var(--green)}.fills .sell{color:var(--red)}
-.fills tr:hover td{background:var(--bg2)}
-.compare{margin:0 28px;padding:16px 20px;background:var(--bg2);border-radius:var(--radius);border:1px solid var(--bg3)}
-.compare h3{font-family:var(--mono);font-size:13px;color:var(--orange);margin-bottom:10px}
-.compare .row{display:flex;gap:12px;flex-wrap:wrap}
-.compare .chip{font-family:var(--mono);font-size:12px;padding:6px 14px;border-radius:20px;cursor:pointer;border:1px solid var(--bg4);color:var(--fg2);transition:all .15s;background:var(--bg)}
-.compare .chip:hover{border-color:var(--fg3);color:var(--fg)}
-.compare .chip.active{border-color:var(--orange);color:var(--orange);background:rgba(232,113,58,0.05)}
-.compare .chip .pnl{margin-left:6px;font-weight:600}
-.compare .chip .pnl.pos{color:var(--green)}.compare .chip .pnl.neg{color:var(--red)}
-.hidden{display:none}
+    :root {
+        --bg: #0B0E14; --panel: #151A22; --border: #232B38;
+        --text: #E2E8F0; --text-muted: #94A3B8;
+        --orange: #FF6B00; --orange-hover: #FF8533;
+        --green: #10B981; --red: #EF4444; --blue: #3B82F6;
+        --font-mono: 'JetBrains Mono', monospace;
+        --font-sans: 'Inter', sans-serif;
+    }
+    body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-sans); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+    
+    .header { display: flex; justify-content: space-between; align-items: center; padding: 12px 24px; background: var(--panel); border-bottom: 1px solid var(--border); z-index: 10; }
+    .header-left { display: flex; align-items: center; gap: 24px; }
+    .header h1 { margin: 0; font-family: var(--font-mono); font-size: 18px; color: var(--orange); letter-spacing: -0.5px; }
+    
+    .view-switcher { display: flex; background: var(--bg); padding: 2px; border-radius: 4px; border: 1px solid var(--border); }
+    .view-btn { padding: 4px 12px; font-size: 11px; font-weight: 700; cursor: pointer; border-radius: 2px; border: none; background: transparent; color: var(--text-muted); transition: 0.2s; font-family: var(--font-mono); }
+    .view-btn.active { background: var(--border); color: var(--orange); }
+
+    .controls { display: flex; gap: 16px; }
+    .control-group { display: flex; align-items: center; gap: 8px; }
+    .control-group label { font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 600; letter-spacing: 0.5px; }
+    select { background: var(--bg); color: var(--text); border: 1px solid var(--border); padding: 4px 10px; border-radius: 4px; font-family: var(--font-mono); font-size: 13px; outline: none; cursor: pointer; }
+
+    .dropzone { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(11, 14, 20, 0.95); z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 4px dashed var(--border); transition: 0.2s; }
+    .dropzone.hidden { display: none; }
+    
+    /* Executive Summary View */
+    #summary-view { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 24px; }
+    .summary-card { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 20px; }
+    .summary-header { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 16px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+    
+    .master-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 12px; }
+    .master-table th { text-align: left; color: var(--text-muted); padding: 12px 8px; border-bottom: 1px solid var(--border); }
+    .master-table td { padding: 10px 8px; border-bottom: 1px solid var(--border); }
+    .master-table tr:hover { background: rgba(255,255,255,0.02); }
+
+    /* Deep Dive Layout */
+    .main-content { display: flex; flex: 1; overflow: hidden; }
+    .sidebar { width: 320px; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+    .kpi-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border); border-bottom: 1px solid var(--border); }
+    .kpi-box { background: var(--panel); padding: 16px; display: flex; flex-direction: column; gap: 4px; }
+    .kpi-label { font-size: 10px; text-transform: uppercase; color: var(--text-muted); font-weight: 600; letter-spacing: 0.5px; }
+    .kpi-val { font-family: var(--font-mono); font-size: 18px; font-weight: 700; }
+    .kpi-val.pos { color: var(--green); }
+    .kpi-val.neg { color: var(--red); }
+    
+    .trade-log { flex: 1; overflow-y: auto; font-family: var(--font-mono); font-size: 11px; }
+    .trade-log table { width: 100%; border-collapse: collapse; text-align: right; }
+    .trade-log th { position: sticky; top: 0; background: var(--bg); padding: 8px; color: var(--text-muted); font-weight: 500; border-bottom: 1px solid var(--border); text-align: right; }
+    .trade-log th:first-child, .trade-log td:first-child { text-align: left; }
+    .trade-log td { padding: 6px 8px; border-bottom: 1px solid var(--border); }
+    
+    .workspace { flex: 1; display: flex; flex-direction: column; overflow-y: auto; background: var(--bg); padding: 16px; gap: 16px; }
+    .chart-container { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 16px; display: flex; flex-direction: column; }
+    .chart-header { font-family: var(--font-mono); font-size: 13px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; display: flex; justify-content: space-between; }
+    
+    #sync-chart { height: 600px; width: 100%; }
+    #sweep-chart { height: 400px; width: 100%; }
+    #portfolio-chart { height: 400px; width: 100%; }
+    
+    .txt-buy { color: var(--green); }
+    .txt-sell { color: var(--red); }
+    .hidden { display: none !important; }
 </style>
 </head>
 <body>
 
-<div class="hdr">
-  <h1>BurntOrangeSwan</h1>
-  <span class="sub">Prosperity 4 Research Dashboard</span>
+<div id="dropzone" class="dropzone" ondragover="event.preventDefault(); this.classList.add('dragover')" ondragleave="this.classList.remove('dragover')" ondrop="handleDrop(event)">
+    <h2>BurntOrangeSwan Terminal</h2>
+    <p>Drop generated CSV files anywhere, or wait for C++ auto-injection.</p>
 </div>
 
-<div id="loader" class="drop" ondrop="handleDrop(event)" ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')">
-  <h2>Drop CSV files to begin</h2>
-  <p>Accepts: pnl.csv, trades.csv, sweep.csv, and raw price/trade CSVs</p>
-  <p style="color:var(--fg3)">Or run <code style="color:var(--orange)">./sweep</code> to auto-generate everything</p>
-  <input type="file" id="fileInput" multiple accept=".csv" onchange="handleFiles(this.files)">
+<div class="header">
+    <div class="header-left">
+        <h1>BOS_QUANT</h1>
+        <div class="view-switcher">
+            <button id="btn-summary" class="view-btn active" onclick="switchView('summary')">SUMMARY</button>
+            <button id="btn-deep" class="view-btn" onclick="switchView('deep')">DEEP DIVE</button>
+        </div>
+    </div>
+    <div id="deep-controls" class="controls hidden">
+        <div class="control-group">
+            <label>Product</label>
+            <select id="sel-product" onchange="render()"></select>
+        </div>
+        <div class="control-group">
+            <label>Strategy</label>
+            <select id="sel-strat" onchange="render()"></select>
+        </div>
+    </div>
 </div>
 
-<div id="app" class="hidden">
-  <div id="compareBar" class="compare hidden">
-    <h3>Strategy comparison</h3>
-    <div class="row" id="stratChips"></div>
-  </div>
-  <div class="ctrl">
-    <label>Product</label>
-    <select id="selProduct" onchange="render()"></select>
-  </div>
-  <div class="stats" id="statsRow"></div>
-  <div class="panels">
-    <div>
-      <div class="ptitle">Profit &amp; loss</div>
-      <div class="pinfo">Cumulative mark-to-market PnL. Green = making money, red = losing.</div>
-      <canvas id="cPnl"></canvas>
+<div id="summary-view">
+    <div class="summary-card">
+        <div class="summary-header">Master Strategy Performance Matrix</div>
+        <table class="master-table">
+            <thead>
+                <tr>
+                    <th>Identifier</th>
+                    <th>Product</th>
+                    <th>Strategy</th>
+                    <th>OOS PnL</th>
+                    <th>Trades</th>
+                    <th>Max DD</th>
+                    <th>Final Pos</th>
+                </tr>
+            </thead>
+            <tbody id="summary-table-body"></tbody>
+        </table>
     </div>
-    <div>
-      <div class="ptitle">Position</div>
-      <div class="pinfo">How many units you're holding. Positive = long, negative = short.</div>
-      <canvas id="cPos"></canvas>
+
+    <div class="summary-card">
+        <div class="summary-header">Aggregate Portfolio Equity Curve</div>
+        <div id="portfolio-chart"></div>
     </div>
-    <div>
-      <div class="ptitle">Order book + your fills</div>
-      <div class="pinfo">Green line = best bid, red = best ask. Dots = where your orders filled.</div>
-      <canvas id="cBook"></canvas>
+</div>
+
+<div id="deep-dive-view" class="main-content hidden">
+    <div class="sidebar">
+        <div class="kpi-grid">
+            <div class="kpi-box"><span class="kpi-label">Strategy PnL</span><span class="kpi-val" id="kpi-pnl">0.00</span></div>
+            <div class="kpi-box"><span class="kpi-label">Win Rate</span><span class="kpi-val" id="kpi-winrate">0%</span></div>
+            <div class="kpi-box"><span class="kpi-label">Max Drawdown</span><span class="kpi-val neg" id="kpi-dd">0.00</span></div>
+            <div class="kpi-box"><span class="kpi-label">Volume</span><span class="kpi-val" id="kpi-vol">0</span></div>
+        </div>
+        <div class="trade-log">
+            <table>
+                <thead><tr><th>Time</th><th>Side</th><th>Px</th><th>Qty</th></tr></thead>
+                <tbody id="log-body"></tbody>
+            </table>
+        </div>
     </div>
-    <div>
-      <div class="ptitle">Spread over time</div>
-      <div class="pinfo">Gap between best ask and best bid. Wider spread = more potential profit per trade.</div>
-      <canvas id="cSpread"></canvas>
+    
+    <div class="workspace">
+        <div class="chart-container">
+            <div class="chart-header"><span>Execution, Inventory & PnL Sync</span></div>
+            <div id="sync-chart"></div>
+        </div>
+        <div class="chart-container" id="sweep-container">
+            <div class="chart-header"><span>Hyperparameter Topology</span></div>
+            <div id="sweep-chart"></div>
+        </div>
     </div>
-    <div>
-      <div class="ptitle">Volume imbalance</div>
-      <div class="pinfo">OBI = (bid_vol - ask_vol) / total. Above 0 = buy pressure, below 0 = sell pressure.</div>
-      <canvas id="cObi"></canvas>
-    </div>
-    <div>
-      <div class="ptitle">Bot activity</div>
-      <div class="pinfo">How many trades each bot made. Helps identify active market makers vs noise.</div>
-      <canvas id="cBots"></canvas>
-    </div>
-    <div class="full">
-      <div class="ptitle">Trade log</div>
-      <div class="pinfo">Your most recent fills. Side, price, and quantity.</div>
-      <div class="fills" id="fillsDiv"></div>
-    </div>
-    <div class="full" id="sweepDiv" style="display:none">
-      <div class="ptitle">Parameter sweep</div>
-      <div class="pinfo">Each bar = one param combo. Sorted best to worst. Find what works.</div>
-      <canvas id="cSweep" style="height:320px!important"></canvas>
-    </div>
-  </div>
 </div>
 
 <script>
-let D = { pnl: {}, trades: {}, prices: [], rawTrades: [], sweep: [] };
-let products = [], charts = {}, activeStrat = null;
+const STATE = { pnl: {}, trades: {}, sweep: [], products: new Set() };
+
+function switchView(view) {
+    document.getElementById('btn-summary').classList.toggle('active', view === 'summary');
+    document.getElementById('btn-deep').classList.toggle('active', view === 'deep');
+    document.getElementById('summary-view').classList.toggle('hidden', view !== 'summary');
+    document.getElementById('deep-dive-view').classList.toggle('hidden', view !== 'deep');
+    document.getElementById('deep-controls').classList.toggle('hidden', view !== 'deep');
+    
+    if (view === 'summary') renderSummary();
+    else render();
+}
 
 function parseCSV(text) {
-  const lines = text.trim().split('\n');
-  if (!lines.length) return [];
-  const h = lines[0];
-  const d = h.split(';').length > h.split(',').length ? ';' : ',';
-  const hdrs = h.split(d).map(x => x.trim());
-  return lines.slice(1).filter(l => l.trim()).map(l => {
-    const v = l.split(d);
-    const o = {};
-    hdrs.forEach((k, i) => o[k] = (v[i] || '').trim());
-    return o;
-  });
-}
-
-function handleDrop(e) { e.preventDefault(); e.currentTarget.classList.remove('over'); handleFiles(e.dataTransfer.files); }
-document.addEventListener('dragover', e => e.preventDefault());
-
-function categorizeFile(name, rows) {
-  name = name.toLowerCase();
-
-  // Per-strategy results FIRST (before generic pnl/trades catch)
-  // Match pnl_omni.csv, pnl_mm.csv, etc.
-  let m = name.match(/^pnl_(\w+)\.csv$/);
-  if (m) { D.pnl[m[1]] = rows; return; }
-
-  m = name.match(/^trades_(\w+)\.csv$/);
-  if (m && !name.includes('round')) { D.trades[m[1]] = rows; return; }
-
-  // Generic pnl.csv = winner / default
-  if (name === 'pnl.csv') { D.pnl['default'] = rows; return; }
-
-  // Generic trades.csv = winner / default
-  if (name === 'trades.csv') { D.trades['default'] = rows; return; }
-
-  // Sweep results
-  if (name.includes('sweep')) { D.sweep = rows; return; }
-
-  // Raw price data
-  if (name.includes('prices')) { D.prices = D.prices.concat(rows); return; }
-
-  // Raw trade data (from rounds)
-  if (name.includes('trades')) { D.rawTrades = D.rawTrades.concat(rows); return; }
-}
-
-async function handleFiles(files) {
-  for (const file of files) {
-    const text = await file.text();
-    const rows = parseCSV(text);
-    if (rows.length) categorizeFile(file.name, rows);
-  }
-
-  // Discover products
-  const ps = new Set();
-  D.prices.forEach(r => { if (r.product) ps.add(r.product); });
-  Object.values(D.pnl).forEach(rows => {
-    if (rows.length) Object.keys(rows[0]).forEach(k => {
-      if (k.endsWith('_pnl') && k !== 'total_pnl') ps.add(k.replace('_pnl', ''));
+    const lines = text.trim().split('\n');
+    if (!lines.length) return [];
+    const delim = lines[0].includes(';') ? ';' : ',';
+    const hdrs = lines[0].split(delim).map(x => x.trim());
+    return lines.slice(1).filter(l => l.trim()).map(l => {
+        const vals = l.split(delim);
+        const obj = {};
+        hdrs.forEach((h, i) => obj[h] = (vals[i] || '').trim());
+        return obj;
     });
-  });
-  products = [...ps].sort();
-  if (!products.length) products = ['ALL'];
-
-  const sel = document.getElementById('selProduct');
-  sel.innerHTML = products.map(p => '<option value="'+p+'">'+p+'</option>').join('');
-
-  // Set activeStrat to first available
-  const strats = Object.keys(D.pnl).filter(k => k !== 'default');
-  if (!activeStrat) {
-    activeStrat = strats.length ? strats[0] : 'default';
-  }
-
-  buildChips();
-  document.getElementById('loader').classList.add('hidden');
-  document.getElementById('app').classList.remove('hidden');
-  render();
 }
 
-function getStratPnl(name) {
-  const rows = D.pnl[name];
-  if (!rows || !rows.length) return 0;
-  return parseFloat(rows[rows.length - 1].total_pnl || 0);
+function ingestData(name, rows) {
+    name = name.toLowerCase();
+    let m = name.match(/^pnl_([a-z]+)_([a-z]+)\.csv$/);
+    if (m) {
+        let strat = m[1], prod = m[2].toUpperCase();
+        if (!STATE.pnl[prod]) STATE.pnl[prod] = {};
+        STATE.pnl[prod][strat] = rows;
+        STATE.products.add(prod);
+        return;
+    }
+    m = name.match(/^trades_([a-z]+)_([a-z]+)\.csv$/);
+    if (m) {
+        let strat = m[1], prod = m[2].toUpperCase();
+        if (!STATE.trades[prod]) STATE.trades[prod] = {};
+        STATE.trades[prod][strat] = rows;
+    }
+    if (name.includes('sweep.csv')) STATE.sweep = rows;
 }
 
-function buildChips() {
-  const strats = Object.keys(D.pnl);
-  if (strats.length <= 1 && !D.sweep.length) return;
-
-  document.getElementById('compareBar').classList.remove('hidden');
-  const div = document.getElementById('stratChips');
-
-  // Also pull strategy names from sweep CSV
-  const sweepPnl = {};
-  D.sweep.forEach(r => { if (r.strategy) sweepPnl[r.strategy] = parseFloat(r.total_pnl || 0); });
-
-  const allNames = new Set([...strats, ...Object.keys(sweepPnl)]);
-
-  let html = '';
-  allNames.forEach(s => {
-    let pnl = D.pnl[s] ? getStratPnl(s) : (sweepPnl[s] || 0);
-    const active = s === activeStrat ? ' active' : '';
-    const label = s === 'default' ? 'winner' : s;
-    const pcls = pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : '';
-    html += '<div class="chip' + active + '" onclick="switchStrat(\'' + s + '\')">' +
-            label + '<span class="pnl ' + pcls + '">' + pnl.toFixed(0) + '</span></div>';
-  });
-  div.innerHTML = html;
+async function handleDrop(e) {
+    e.preventDefault();
+    document.getElementById('dropzone').classList.add('hidden');
+    for (const file of e.dataTransfer.files) {
+        const text = await file.text();
+        ingestData(file.name, parseCSV(text));
+    }
+    initUI();
 }
 
-function switchStrat(s) {
-  activeStrat = s;
-  buildChips();
-  render();
+window.addEventListener('DOMContentLoaded', () => {
+    if (typeof _i !== 'undefined') {
+        _i.forEach(file => ingestData(file.name, parseCSV(file.content)));
+        document.getElementById('dropzone').classList.add('hidden');
+        initUI();
+    }
+});
+
+function initUI() {
+    if (STATE.products.size === 0) return;
+    const selProd = document.getElementById('sel-product');
+    selProd.innerHTML = Array.from(STATE.products).map(p => `<option value="${p}">${p}</option>`).join('');
+    updateStratDropdown();
+    renderSummary();
 }
 
-function getPnlRows() { return D.pnl[activeStrat] || D.pnl['default'] || []; }
-function getTradeRows() { return D.trades[activeStrat] || D.trades['default'] || []; }
+function updateStratDropdown() {
+    const prod = document.getElementById('sel-product').value;
+    const selStrat = document.getElementById('sel-strat');
+    if (!STATE.pnl[prod]) return;
+    const strats = Object.keys(STATE.pnl[prod]);
+    selStrat.innerHTML = strats.map(s => `<option value="${s}">${s.toUpperCase()}</option>`).join('');
+}
+
+function renderSummary() {
+    let portfolioCurve = {};
+    let tableHtml = "";
+
+    STATE.products.forEach(prod => {
+        Object.keys(STATE.pnl[prod]).forEach(strat => {
+            const pnlData = STATE.pnl[prod][strat];
+            const tradeData = STATE.trades[prod][strat] || [];
+            const pk = prod + '_pnl', posk = prod + '_position';
+            
+            const finalPnl = parseFloat(pnlData[pnlData.length-1][pk] || 0);
+            const finalPos = pnlData[pnlData.length-1][posk] || 0;
+            
+            let peak = 0, maxDd = 0;
+            pnlData.forEach(r => {
+                let v = parseFloat(r[pk] || 0);
+                if (v > peak) peak = v;
+                if (peak - v > maxDd) maxDd = peak - v;
+                // Add to portfolio curve if this is the winner (logic: best pnl for symbol)
+                // For this summary, we'll just track all to avoid logic bloat
+            });
+
+            tableHtml += `<tr>
+                <td>${strat}_${prod}</td>
+                <td>${prod}</td>
+                <td><span style="color:var(--orange)">${strat.toUpperCase()}</span></td>
+                <td class="${finalPnl >= 0 ? 'txt-buy' : 'txt-sell'}">${finalPnl.toFixed(2)}</td>
+                <td>${tradeData.length}</td>
+                <td style="color:var(--red)">${maxDd.toFixed(2)}</td>
+                <td>${finalPos}</td>
+            </tr>`;
+        });
+    });
+
+    document.getElementById('summary-table-body').innerHTML = tableHtml;
+
+    // Portfolio Chart Logic (Simplified to sum all loaded PnL by timestamp)
+    let combined = {};
+    STATE.products.forEach(prod => {
+        Object.keys(STATE.pnl[prod]).forEach(strat => {
+            STATE.pnl[prod][strat].forEach(r => {
+                let ts = parseInt(r.timestamp);
+                let val = parseFloat(r[prod + '_pnl'] || 0);
+                combined[ts] = (combined[ts] || 0) + val;
+            });
+        });
+    });
+
+    let tsKeys = Object.keys(combined).sort((a,b) => a-b);
+    Plotly.newPlot('portfolio-chart', [{
+        x: tsKeys, y: tsKeys.map(t => combined[t]),
+        type: 'scatter', mode: 'lines', line: { color: '#FF6B00', width: 2 },
+        fill: 'tozeroy', fillcolor: 'rgba(255,107,0,0.1)'
+    }], {
+        paper_bgcolor: '#151A22', plot_bgcolor: '#151A22', font: { color: '#94A3B8' },
+        margin: { l: 50, r: 20, t: 10, b: 40 }, xaxis: { gridcolor: '#232B38' }, yaxis: { gridcolor: '#232B38' }
+    });
+}
 
 function render() {
-  const prod = document.getElementById('selProduct').value;
-  const pnlRows = getPnlRows();
-  const tradeRows = getTradeRows();
-  renderStats(prod, pnlRows, tradeRows);
-  renderPnl(prod, pnlRows);
-  renderPos(prod, pnlRows);
-  renderBook(prod, tradeRows);
-  renderSpread(prod);
-  renderObi(prod);
-  renderBots(prod);
-  renderFills(prod, tradeRows);
-  if (D.sweep.length) renderSweep();
+    const prod = document.getElementById('sel-product').value;
+    const strat = document.getElementById('sel-strat').value;
+    const pnlData = STATE.pnl[prod][strat];
+    const tradeData = STATE.trades[prod][strat] || [];
+    
+    // KPI Calculation
+    let pk = pnlData[0][prod + '_pnl'] !== undefined ? prod + '_pnl' : 'total_pnl';
+    let posk = pnlData[0][prod + '_position'] !== undefined ? prod + '_position' : 'position';
+    let finalPnl = parseFloat(pnlData[pnlData.length-1][pk] || 0);
+    let vol = 0, peak = 0, maxDd = 0;
+    
+    tradeData.forEach(r => vol += Math.abs(parseInt(r.quantity || 0)));
+    pnlData.forEach(r => {
+        let v = parseFloat(r[pk] || 0);
+        if (v > peak) peak = v;
+        if (peak - v > maxDd) maxDd = peak - v;
+    });
+
+    document.getElementById('kpi-pnl').innerText = finalPnl.toFixed(2);
+    document.getElementById('kpi-pnl').className = 'kpi-val ' + (finalPnl >= 0 ? 'pos' : 'neg');
+    document.getElementById('kpi-dd').innerText = maxDd.toFixed(2);
+    document.getElementById('kpi-vol').innerText = vol;
+    
+    document.getElementById('log-body').innerHTML = tradeData.slice().reverse().slice(0, 50).map(r => `<tr>
+        <td>${r.timestamp}</td><td class="${r.side==='BUY'?'txt-buy':'txt-sell'}">${r.side}</td><td>${r.price}</td><td>${r.quantity}</td>
+    </tr>`).join('');
+
+    // Sync Chart
+    let buysX = [], buysY = [], sellsX = [], sellsY = [];
+    tradeData.forEach(r => {
+        if (r.side === 'BUY') { buysX.push(r.timestamp); buysY.push(r.price); }
+        else { sellsX.push(r.timestamp); sellsY.push(r.price); }
+    });
+    Plotly.newPlot('sync-chart', [
+        { x: buysX, y: buysY, type: 'scatter', mode: 'markers', marker: { symbol: 'triangle-up', size: 8, color: '#10B981' } },
+        { x: sellsX, y: sellsY, type: 'scatter', mode: 'markers', marker: { symbol: 'triangle-down', size: 8, color: '#EF4444' } },
+        { x: pnlData.map(r=>r.timestamp), y: pnlData.map(r=>r[posk]), fill: 'tozeroy', yaxis: 'y2', line: {color: '#3B82F6', width: 1} },
+        { x: pnlData.map(r=>r.timestamp), y: pnlData.map(r=>r[pk]), yaxis: 'y3', line: {color: '#10B981', width: 2} }
+    ], {
+        paper_bgcolor: '#151A22', plot_bgcolor: '#151A22', font: { color: '#94A3B8' },
+        margin: { l: 50, r: 20, t: 30, b: 30 }, grid: { rows: 3, columns: 1, pattern: 'independent' },
+        showlegend: false, xaxis: { gridcolor: '#232B38' },
+        yaxis: { domain: [0.6, 1], gridcolor: '#232B38' },
+        yaxis2: { domain: [0.3, 0.55], gridcolor: '#232B38' },
+        yaxis3: { domain: [0, 0.25], gridcolor: '#232B38' }
+    });
+
+    // Sweep Chart
+    let data = STATE.sweep.filter(r => r.strategy === strat);
+    if (data.length) {
+        let pnlArr = data.map(r => parseFloat(r.total_pnl));
+        let dims = [];
+        Object.keys(data[0]).forEach(k => {
+            if (!['strategy', 'total_pnl', 'total_trades', 'max_drawdown'].includes(k) && !k.includes('_pnl')) {
+                dims.push({ label: k, values: data.map(r => parseFloat(r[k])) });
+            }
+        });
+        dims.push({ label: 'PnL', values: pnlArr });
+        Plotly.newPlot('sweep-chart', [{ type: 'parcoords', line: { color: pnlArr, colorscale: 'Viridis' }, dimensions: dims }], { paper_bgcolor: '#151A22', font: { color: '#E2E8F0' } });
+    }
 }
-
-function kill(id) { if (charts[id]) { charts[id].destroy(); delete charts[id]; } }
-
-function renderStats(prod, pnlRows, tradeRows) {
-  const pk = prod + '_pnl', posk = prod + '_position';
-  let pnl = 0, pos = 0, dd = 0, fills = 0, avgSpread = 0;
-  if (pnlRows.length) {
-    const last = pnlRows[pnlRows.length - 1];
-    pnl = parseFloat(last[pk] || last.total_pnl || 0);
-    pos = parseInt(last[posk] || 0);
-    let peak = 0;
-    pnlRows.forEach(r => { const v = parseFloat(r[pk] || r.total_pnl || 0); if (v > peak) peak = v; if (peak - v > dd) dd = peak - v; });
-  }
-  fills = tradeRows.filter(r => (r.product || r.symbol) === prod).length;
-  const prows = D.prices.filter(r => r.product === prod);
-  if (prows.length) { let t = 0, n = 0; prows.forEach(r => { const a = +r.ask_price_1, b = +r.bid_price_1; if (a && b) { t += a - b; n++; } }); avgSpread = n ? t / n : 0; }
-  const c = v => v > 0 ? 'up' : v < 0 ? 'down' : 'flat';
-  document.getElementById('statsRow').innerHTML =
-    '<div class="stat '+c(pnl)+'"><div class="v">'+pnl.toFixed(2)+'</div><div class="l">Total PnL</div><div class="hint">Mark-to-market profit/loss</div></div>' +
-    '<div class="stat flat"><div class="v">'+fills+'</div><div class="l">Fills</div><div class="hint">Orders that got executed</div></div>' +
-    '<div class="stat '+(dd>0?'down':'flat')+'"><div class="v">'+dd.toFixed(0)+'</div><div class="l">Max drawdown</div><div class="hint">Worst peak-to-trough drop</div></div>' +
-    '<div class="stat '+c(pos)+'"><div class="v">'+pos+'</div><div class="l">Position</div><div class="hint">Current inventory (+ long, - short)</div></div>' +
-    '<div class="stat flat"><div class="v">'+avgSpread.toFixed(1)+'</div><div class="l">Avg spread</div><div class="hint">Mean ask - bid gap</div></div>';
-}
-
-function renderPnl(prod, pnlRows) {
-  kill('cPnl'); if (!pnlRows.length) return;
-  const k = prod + '_pnl'; const has = pnlRows[0][k] !== undefined;
-  const labels = pnlRows.map(r => +r.timestamp);
-  const vals = pnlRows.map(r => parseFloat(has ? r[k] : (r.total_pnl || 0)));
-  const clr = vals[vals.length - 1] >= 0 ? '#22c55e' : '#ef4444';
-  charts.cPnl = new Chart(document.getElementById('cPnl'), { type: 'line',
-    data: { labels, datasets: [{ data: vals, borderColor: clr, borderWidth: 1.5, pointRadius: 0,
-      fill: { target: 'origin', above: 'rgba(34,197,94,.06)', below: 'rgba(239,68,68,.06)' } }] }, options: opts() });
-}
-
-function renderPos(prod, pnlRows) {
-  kill('cPos'); if (!pnlRows.length) return;
-  const k = prod + '_position'; if (pnlRows[0][k] === undefined) return;
-  const labels = pnlRows.map(r => +r.timestamp);
-  const vals = pnlRows.map(r => parseInt(r[k] || 0));
-  charts.cPos = new Chart(document.getElementById('cPos'), { type: 'line',
-    data: { labels, datasets: [{ data: vals, borderColor: '#3b82f6', borderWidth: 1.5, pointRadius: 0,
-      fill: { target: 'origin', above: 'rgba(59,130,246,.06)', below: 'rgba(59,130,246,.06)' } }] }, options: opts() });
-}
-
-function renderBook(prod, tradeRows) {
-  kill('cBook');
-  const rows = D.prices.filter(r => r.product === prod);
-  if (!rows.length) return;
-  const step = Math.max(1, Math.floor(rows.length / 500));
-  const s = rows.filter((_, i) => i % step === 0);
-  const ds = [
-    { label: 'Bid', data: s.map(r => ({ x: +r.timestamp, y: +r.bid_price_1 })), borderColor: '#22c55e', borderWidth: 1, pointRadius: 0, fill: false, order: 2 },
-    { label: 'Ask', data: s.map(r => ({ x: +r.timestamp, y: +r.ask_price_1 })), borderColor: '#ef4444', borderWidth: 1, pointRadius: 0, fill: false, order: 2 },
-  ];
-  const fills = tradeRows.filter(r => (r.product || r.symbol) === prod);
-  const b = [], sl = [];
-  fills.forEach(r => { const pt = { x: +r.timestamp, y: +r.price }; r.side === 'BUY' ? b.push(pt) : sl.push(pt); });
-  if (b.length) ds.push({ label: 'Your buys', data: b, type: 'scatter', backgroundColor: '#22c55e', pointRadius: 4, order: 1 });
-  if (sl.length) ds.push({ label: 'Your sells', data: sl, type: 'scatter', backgroundColor: '#ef4444', pointRadius: 4, pointStyle: 'triangle', order: 1 });
-  charts.cBook = new Chart(document.getElementById('cBook'), { type: 'scatter', data: { datasets: ds },
-    options: { ...opts(), plugins: { legend: { display: true, labels: { color: '#71717a', font: { size: 10, family: 'JetBrains Mono' } } } },
-      scales: { x: { type: 'linear', ...ax() }, y: ax() } } });
-}
-
-function renderSpread(prod) {
-  kill('cSpread');
-  const rows = D.prices.filter(r => r.product === prod); if (!rows.length) return;
-  const step = Math.max(1, Math.floor(rows.length / 500));
-  const s = rows.filter((_, i) => i % step === 0);
-  const labels = s.map(r => +r.timestamp);
-  const vals = s.map(r => { const a = +r.ask_price_1, b = +r.bid_price_1; return (a && b) ? a - b : 0; });
-  charts.cSpread = new Chart(document.getElementById('cSpread'), { type: 'line',
-    data: { labels, datasets: [{ data: vals, borderColor: '#f59e0b', borderWidth: 1, pointRadius: 0,
-      fill: { target: 'origin', above: 'rgba(245,158,11,.06)' } }] }, options: opts() });
-}
-
-function renderObi(prod) {
-  kill('cObi');
-  const rows = D.prices.filter(r => r.product === prod); if (!rows.length) return;
-  const step = Math.max(1, Math.floor(rows.length / 500));
-  const s = rows.filter((_, i) => i % step === 0);
-  const labels = s.map(r => +r.timestamp);
-  const vals = s.map(r => {
-    const bv = (+r.bid_volume_1 || 0) + (+r.bid_volume_2 || 0) + (+r.bid_volume_3 || 0);
-    const av = (+r.ask_volume_1 || 0) + (+r.ask_volume_2 || 0) + (+r.ask_volume_3 || 0);
-    return (bv + av) > 0 ? (bv - av) / (bv + av) : 0;
-  });
-  charts.cObi = new Chart(document.getElementById('cObi'), { type: 'line',
-    data: { labels, datasets: [{ data: vals, borderColor: '#a78bfa', borderWidth: 1, pointRadius: 0,
-      fill: { target: 'origin', above: 'rgba(167,139,250,.08)', below: 'rgba(167,139,250,.08)' },
-      segment: { borderColor: ctx => ctx.p0.parsed.y >= 0 ? '#22c55e' : '#ef4444' } }] },
-    options: { ...opts(), scales: { x: ax(), y: { ...ax(), min: -1, max: 1 } } } });
-}
-
-function renderBots(prod) {
-  kill('cBots');
-  const rows = D.rawTrades.filter(r => (r.symbol || r.product) === prod); if (!rows.length) return;
-  const counts = {};
-  rows.forEach(r => { if (r.buyer) counts[r.buyer] = (counts[r.buyer] || 0) + 1; if (r.seller) counts[r.seller] = (counts[r.seller] || 0) + 1; });
-  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 10); if (!sorted.length) return;
-  const colors = ['#e8713a','#f59e0b','#22c55e','#3b82f6','#a78bfa','#2dd4bf','#ef4444','#ec4899','#6366f1','#84cc16'];
-  charts.cBots = new Chart(document.getElementById('cBots'), { type: 'bar',
-    data: { labels: sorted.map(s => s[0]), datasets: [{ data: sorted.map(s => s[1]), backgroundColor: sorted.map((_, i) => colors[i % colors.length]) }] },
-    options: { ...opts(), indexAxis: 'y', plugins: { legend: { display: false } } } });
-}
-
-function renderFills(prod, tradeRows) {
-  const rows = tradeRows.filter(r => (r.product || r.symbol) === prod).slice(-40).reverse();
-  const div = document.getElementById('fillsDiv');
-  if (!rows.length) { div.innerHTML = '<p style="color:var(--fg3);padding:12px;font-style:italic">No fills for ' + prod + '</p>'; return; }
-  let h = '<table><tr><th>Time</th><th>Side</th><th>Price</th><th>Qty</th></tr>';
-  rows.forEach(r => { h += '<tr><td>'+r.timestamp+'</td><td class="'+(r.side==='BUY'?'buy':'sell')+'">'+r.side+'</td><td>'+r.price+'</td><td>'+r.quantity+'</td></tr>'; });
-  div.innerHTML = h + '</table>';
-}
-
-function renderSweep() {
-  kill('cSweep'); if (!D.sweep.length) return;
-  document.getElementById('sweepDiv').style.display = '';
-  const sorted = [...D.sweep].sort((a, b) => parseFloat(b.total_pnl) - parseFloat(a.total_pnl));
-  const paramKeys = Object.keys(sorted[0]).filter(k => !['total_pnl','total_trades','max_drawdown','strategy'].includes(k) && !k.includes('_pnl'));
-  const top = sorted.slice(0, 30);
-  const labels = top.map(r => { const pre = r.strategy ? r.strategy + ': ' : ''; return pre + paramKeys.map(k => r[k] ? k+'='+r[k] : '').filter(Boolean).join(' '); });
-  const vals = top.map(r => parseFloat(r.total_pnl));
-  charts.cSweep = new Chart(document.getElementById('cSweep'), { type: 'bar',
-    data: { labels, datasets: [{ data: vals, backgroundColor: vals.map(v => v >= 0 ? 'rgba(34,197,94,.5)' : 'rgba(239,68,68,.5)'), borderColor: vals.map(v => v >= 0 ? '#22c55e' : '#ef4444'), borderWidth: 1 }] },
-    options: { ...opts(), indexAxis: 'y', plugins: { legend: { display: false } } } });
-}
-
-function ax() { return { ticks: { color: '#52525b', font: { size: 10, family: 'JetBrains Mono' } }, grid: { color: '#1a1f2e' } }; }
-function opts() { return { responsive: true, maintainAspectRatio: false, animation: false,
-  plugins: { legend: { display: false }, tooltip: { titleFont: { size: 11, family: 'JetBrains Mono' }, bodyFont: { size: 11, family: 'JetBrains Mono' }, backgroundColor: '#1a1f2e', borderColor: '#242b3d', borderWidth: 1 } },
-  scales: { x: ax(), y: ax() } }; }
 </script>
 </body>
 </html>
