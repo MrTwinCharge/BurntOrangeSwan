@@ -1,12 +1,22 @@
 #include "engine/lob.hpp"
 #include <cmath>
 #include <algorithm>
+#include <iostream>
+#include <iomanip>
+#include <set>
+
+static void print_cal_once(const std::string& msg) {
+    static std::set<std::string> printed;
+    if (printed.insert(msg).second) {
+        std::cout << msg << std::endl;
+    }
+}
 
 LimitOrderBook::LimitOrderBook(const std::string& sym) {
     symbol = sym;
     position_limit = get_position_limit(sym);
     result.symbol = sym;
-    calibrate_for_product();
+    set_hardcoded_rates();
 }
 
 void LimitOrderBook::init_rng() {
@@ -17,27 +27,118 @@ void LimitOrderBook::init_rng() {
     }
 }
 
-void LimitOrderBook::calibrate_for_product() {
-    // Averaged across 5 real Prosperity 4 submissions:
-    //   EMERALDS: ~10 buys + ~16 sells per 2000 ticks, size 3-8
-    //   TOMATOES: ~35 buys + ~32 sells per 2000 ticks, size 2-5
+void LimitOrderBook::set_hardcoded_rates() {
+    // Known products calibrated from 5 real Prosperity 4 submissions
     if (symbol == "EMERALDS") {
         passive_fill_prob_buy = 10.0 / 2000.0;   // 0.005
         passive_fill_prob_sell = 16.0 / 2000.0;   // 0.008
         min_fill_size = 3;
         max_fill_size = 8;
+        use_hardcoded = true;
     } else if (symbol == "TOMATOES") {
         passive_fill_prob_buy = 35.0 / 2000.0;    // 0.0175
         passive_fill_prob_sell = 32.0 / 2000.0;    // 0.016
         min_fill_size = 2;
         max_fill_size = 5;
+        use_hardcoded = true;
     } else {
-        // Conservative default for unknown products
-        passive_fill_prob_buy = 15.0 / 2000.0;
-        passive_fill_prob_sell = 15.0 / 2000.0;
+        // Unknown product — will auto-calibrate from observed trade data
+        use_hardcoded = false;
+        auto_calibrated = false;
+        // Conservative defaults until calibration completes
+        passive_fill_prob_buy = 0.0075;
+        passive_fill_prob_sell = 0.0075;
         min_fill_size = 2;
         max_fill_size = 6;
     }
+}
+
+void LimitOrderBook::update_calibration(const std::vector<PublicTrade>& trades, const OrderBookState& state) {
+    if (auto_calibrated) return;
+    if (ticks_seen >= CALIBRATION_WINDOW) return;
+
+    ticks_seen++;
+
+    for (const auto& trade : trades) {
+        trades_observed++;
+        int qty = std::abs(trade.quantity);
+        if (qty < min_qty_seen) min_qty_seen = qty;
+        if (qty > max_qty_seen) max_qty_seen = qty;
+        sum_qty += qty;
+
+        // Classify: was this bot buying (trade at ask) or selling (trade at bid)?
+        if (state.ask_price_1 > 0 && trade.price >= (int32_t)state.ask_price_1) {
+            buy_trades++;   // bot bought aggressively → would sell to our bid passively
+        } else if (state.bid_price_1 > 0 && trade.price <= (int32_t)state.bid_price_1) {
+            sell_trades++;  // bot sold aggressively → would buy from our ask passively
+        } else {
+            // Mid-price trade — split evenly
+            buy_trades++;
+            sell_trades++;
+        }
+    }
+
+    // Auto-finalize after calibration window
+    if (ticks_seen >= CALIBRATION_WINDOW) {
+        finalize_calibration();
+    }
+}
+
+void LimitOrderBook::finalize_calibration() {
+    if (auto_calibrated) return;
+    if (ticks_seen == 0) return;
+
+    // Compute observed fill rates
+    double obs_rate = (double)trades_observed / ticks_seen;
+    double fill_rate = obs_rate * TUTORIAL_TO_REAL_RATIO;
+
+    double total_dir = buy_trades + sell_trades;
+    double buy_frac = (total_dir > 0) ? (double)sell_trades / total_dir : 0.5;
+    double sell_frac = (total_dir > 0) ? (double)buy_trades / total_dir : 0.5;
+
+    double obs_buy = std::max(0.001, std::min(0.05, fill_rate * buy_frac));
+    double obs_sell = std::max(0.001, std::min(0.05, fill_rate * sell_frac));
+
+    int obs_min_size = (min_qty_seen <= max_qty_seen && min_qty_seen < 999) ? min_qty_seen : min_fill_size;
+    int obs_max_size = (max_qty_seen > 0) ? max_qty_seen : max_fill_size;
+
+    if (use_hardcoded) {
+        // Check if observed behavior diverges >30% from hardcoded
+        double hardcoded_total = passive_fill_prob_buy + passive_fill_prob_sell;
+        double obs_total = obs_buy + obs_sell;
+        double divergence = std::abs(obs_total - hardcoded_total) / hardcoded_total;
+
+        if (divergence > 0.30) {
+            // Behavior changed — override with observed
+            passive_fill_prob_buy = obs_buy;
+            passive_fill_prob_sell = obs_sell;
+            min_fill_size = obs_min_size;
+            max_fill_size = obs_max_size;
+            print_cal_once("[LOB Re-Cal] " + symbol + ":"
+                + " hardcoded=" + std::to_string(hardcoded_total)
+                + " observed=" + std::to_string(obs_total)
+                + " -> OVERRIDING with observed rates");
+        } else {
+            print_cal_once("[LOB Cal-OK] " + symbol + ":"
+                + " hardcoded rates confirmed (divergence="
+                + std::to_string((int)(divergence * 100)) + "%)");
+        }
+    } else {
+        // Unknown product — use observed
+        passive_fill_prob_buy = obs_buy;
+        passive_fill_prob_sell = obs_sell;
+        min_fill_size = obs_min_size;
+        max_fill_size = obs_max_size;
+
+        print_cal_once("[LOB Auto-Cal] " + symbol + ":"
+            + " fill_buy=" + std::to_string(passive_fill_prob_buy)
+            + " fill_sell=" + std::to_string(passive_fill_prob_sell)
+            + " size=" + std::to_string(min_fill_size) + "-" + std::to_string(max_fill_size)
+            + " (from " + std::to_string(trades_observed) + " trades in "
+            + std::to_string(ticks_seen) + " ticks)");
+    }
+
+    auto_calibrated = true;
 }
 
 void LimitOrderBook::cancel_all_resting() {
@@ -48,10 +149,13 @@ void LimitOrderBook::match_orders(const std::vector<StrategyOrder>& orders) {
     pending_orders = orders;
 }
 
-void LimitOrderBook::update(const OrderBookState& state, const std::vector<PublicTrade>& /*trades*/) {
+void LimitOrderBook::update(const OrderBookState& state, const std::vector<PublicTrade>& trades) {
     current_state = state;
     uint32_t ts = state.timestamp;
     init_rng();
+
+    // ═══ 0. AUTO-CALIBRATION: observe trade data for unknown products ═══
+    update_calibration(trades, state);
 
     // ═══ 1. LATENCY: Pending cancels and orders from LAST tick arrive now ═══
     if (cancel_requested) {
@@ -67,7 +171,6 @@ void LimitOrderBook::update(const OrderBookState& state, const std::vector<Publi
     }
 
     // ═══ 2. AGGRESSIVE CROSSES ═══
-    // Orders priced through the spread fill immediately at book price
     for (auto& order : resting_orders) {
         if (order.quantity == 0) continue;
 
@@ -116,18 +219,13 @@ void LimitOrderBook::update(const OrderBookState& state, const std::vector<Publi
     }
 
     // ═══ 3. STOCHASTIC PASSIVE FILLS ═══
-    // This is the SOLE source of passive fills. No public trade matching.
-    // Calibrated from real exchange data: bots interact with resting orders
-    // at fixed rates regardless of quote width or order size.
-    // Fill happens at YOUR resting price. Size is bot-determined (3-8 or 2-5).
     std::uniform_real_distribution<double> prob_dist(0.0, 1.0);
-    std::uniform_int_distribution<int> size_dist(min_fill_size, max_fill_size);
+    std::uniform_int_distribution<int> size_dist(min_fill_size, std::max(min_fill_size, max_fill_size));
 
     for (auto& order : resting_orders) {
         if (order.quantity == 0) continue;
 
         if (order.is_buy()) {
-            // Skip if this would be an aggressive cross (already handled above)
             if (state.ask_price_1 > 0 && order.price >= (int32_t)state.ask_price_1) continue;
 
             if (prob_dist(rng) < passive_fill_prob_buy) {
