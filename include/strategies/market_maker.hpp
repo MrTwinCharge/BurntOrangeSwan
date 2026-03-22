@@ -14,6 +14,7 @@ private:
 public:
     int default_edge = 2;
     int default_order_size = 5;
+    double risk_aversion = 0.05; // Continuous inventory risk parameter
 
     void on_tick([[maybe_unused]] uint32_t timestamp,
                  const std::vector<OrderBookState>& books,
@@ -35,13 +36,24 @@ public:
 
             if (book.bid_price_1 == 0 || book.ask_price_1 == 0) continue;
 
-            double fair_value = std::round(book.mid_price());
+            // 1. Calculate the volume-weighted micro-price
+            double bid_vol = book.bid_volume_1; 
+            double ask_vol = book.ask_volume_1; 
+            double micro_price = (book.bid_price_1 * ask_vol + book.ask_price_1 * bid_vol) / (bid_vol + ask_vol);
 
-            int32_t target_bid = (int32_t)fair_value - default_edge;
-            int32_t target_ask = (int32_t)fair_value + default_edge;
+            // 2. Calculate the Avellaneda-Stoikov continuous inventory skew
+            double inventory_skew = lob.position * risk_aversion;
+            
+            // 3. Shift the reservation price away from inventory risk
+            double reservation_price = micro_price - inventory_skew;
 
-            target_bid = std::min(target_bid, (int32_t)book.bid_price_1);
-            target_ask = std::max(target_ask, (int32_t)book.ask_price_1);
+            // 4. Set asymmetric quotes around the reservation price
+            int32_t target_bid = (int32_t)std::round(reservation_price) - default_edge;
+            int32_t target_ask = (int32_t)std::round(reservation_price) + default_edge;
+
+            // Ensure we do not passively cross the spread (but allow stepping inside it)
+            target_bid = std::min(target_bid, (int32_t)book.ask_price_1 - 1);
+            target_ask = std::max(target_ask, (int32_t)book.bid_price_1 + 1);
 
             if (target_bid != current_bids[i] || target_ask != current_asks[i] || lob.position != last_positions[i]) {
                 

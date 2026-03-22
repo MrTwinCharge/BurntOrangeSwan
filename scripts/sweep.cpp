@@ -35,11 +35,12 @@ std::vector<StrategyEntry> build_registry(const std::string& active_symbol) {
             s->target_symbols = {active_symbol}; return s;
         }});
 
+    // AUGMENTED: Added continuous skew risk_aversion to the sweep grid
     reg.push_back({"mm", "trader_mm.py",
-        {{"edge", 0, 5, 1}, {"order_size", 2, 20, 2}},
+        {{"edge", 0, 5, 1}, {"order_size", 2, 20, 2}, {"risk_aversion", 0.01, 0.20, 0.02}},
         [active_symbol](const std::vector<double>& p) -> Strategy* {
             auto* s = new MarketMaker(); s->default_edge=(int)p[0]; s->default_order_size=(int)p[1]; 
-            s->target_symbols = {active_symbol}; return s;
+            s->risk_aversion=p[2]; s->target_symbols = {active_symbol}; return s;
         }});
 
     reg.push_back({"mr", "trader_mr.py",
@@ -246,7 +247,6 @@ int main(int argc, char* argv[]) {
             x.r.total_trades = oos_trades;
             delete strat;
 
-            // 🚀 FIX: Add EVERY strategy to the dashboard, not just the winner
             dashboard_strats.push_back(output_name);
         }
 
@@ -264,8 +264,13 @@ int main(int argc, char* argv[]) {
         std::cout << "║ " << std::left << std::setw(10) << x.symbol << " : " << std::setw(6) << x.strat_name
                   << " PnL: " << std::right << std::setw(8) << std::fixed << std::setprecision(2) << x.r.total_pnl
                   << "  Trades: " << std::setw(5) << x.r.total_trades << "  [";
+        
+        // FIXED: Misleading indentation warning resolved here
         for (size_t j = 0; j < x.p.size(); j++) {
-            if (j) std::cout << ","; std::cout << x.p[j].name << "=" << std::setprecision(2) << x.r.params[j];
+            if (j > 0) {
+                std::cout << ",";
+            }
+            std::cout << x.p[j].name << "=" << std::setprecision(2) << x.r.params[j];
         }
         std::cout << "]\n";
     }
@@ -273,7 +278,28 @@ int main(int argc, char* argv[]) {
               << "║ TOTAL COMBINED OOS PNL: " << std::right << std::setw(16) << std::fixed << std::setprecision(2) << total_portfolio_oos_pnl << "                   ║\n"
               << "╚══════════════════════════════════════════════════════════════════╝\n\n";
 
-    if (gen) std::cout << "[Gen] Frankenstein Omni-Bot code generation is pending Step 2!\n";
+    // AUGMENTED: Export the Frankenstein Routing table for the Python code generator
+    std::ofstream json_out("../results/optimal_routing.json");
+    if (json_out.is_open()) {
+        json_out << "{\n";
+        for (size_t i = 0; i < master_portfolio.size(); ++i) {
+            const auto& x = master_portfolio[i];
+            json_out << "  \"" << x.symbol << "\": {\"strategy\": \"" << x.strat_name 
+                     << "\", \"template\": \"" << x.tmpl << "\", \"params\": {";
+            for (size_t j = 0; j < x.p.size(); ++j) {
+                json_out << "\"" << x.p[j].name << "\": " << x.r.params[j];
+                if (j < x.p.size() - 1) json_out << ", ";
+            }
+            json_out << "}}";
+            if (i < master_portfolio.size() - 1) json_out << ",";
+            json_out << "\n";
+        }
+        json_out << "}\n";
+        json_out.close();
+        std::cout << "[Gen] Exported optimal_routing.json to results/\n";
+    }
+
+    if (gen) std::cout << "[Gen] Frankenstein Omni-Bot code generation is pending python script run!\n";
     if (vis) open_dashboard(dashboard_strats);
 
     return 0;
