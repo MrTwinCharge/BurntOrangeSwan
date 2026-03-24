@@ -7,9 +7,10 @@ class LimitOrderBook {
 public:
     std::string symbol;
     int position = 0;
-    int position_limit = 20;
+    int position_limit = 50;
     
-    // 🚀 NEW: Market-calibrated friction multiplier (defaults to 1.0)
+    // Friction for AT-TOUCH orders only (inside-spread orders have friction=0).
+    // Set to ~1.0 for aggressive fill estimation, higher for conservative.
     double friction_coefficient = 1.0; 
     
     ProductResult result;
@@ -19,6 +20,7 @@ public:
     bool cancel_requested = false;
 
     OrderBookState current_state;
+    OrderBookState prev_state;  // Previous tick's state for book-delta inference
 
     LimitOrderBook() = default;
     LimitOrderBook(const std::string& sym);

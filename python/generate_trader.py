@@ -5,6 +5,10 @@ from your C++ sweep results.
 
 Reads: ../results/optimal_routing.json
 Writes: trader.py (ready to upload to prosperity.imc.com)
+
+Now auto-injects:
+  - TOTAL_TICKS from sweep metadata (no more hardcoded 2000)
+  - LIMIT (position_limit) per product from C++ get_position_limit()
 """
 
 import json
@@ -27,7 +31,12 @@ def main():
     with open(routing_path, "r") as f:
         routing = json.load(f)
 
+    # Extract metadata (total_ticks) then remove from product iteration
+    meta = routing.pop("_meta", {})
+    total_ticks = int(meta.get("total_ticks", 10000))
+    
     print(f"[generate_trader] Loading Frankenstein Portfolio...")
+    print(f"[generate_trader] Total ticks from sweep: {total_ticks}")
 
     # Set up the master file with global imports
     final_code = (
@@ -42,8 +51,9 @@ def main():
         strat_name = data["strategy"]
         tmpl_file = data["template"]
         params = data["params"]
+        pos_limit = int(data.get("position_limit", 50))
         
-        print(f"  -> Routing {product} to {strat_name} module...")
+        print(f"  -> Routing {product} to {strat_name} module (limit={pos_limit}, ticks={total_ticks})...")
         
         tmpl_path = os.path.join(PYTHON_DIR, "traders", tmpl_file)
         if not os.path.exists(tmpl_path):
@@ -63,16 +73,20 @@ def main():
             upper_name = p_name.upper()
             code = re.sub(rf'{upper_name}\s*=\s*[\d.]+', f'{upper_name} = {p_val}', code)
 
-        # 3. Rename the isolated class
+        # 3. Inject TOTAL_TICKS and LIMIT from sweep metadata
+        code = re.sub(r'TOTAL_TICKS\s*=\s*[\d.]+', f'TOTAL_TICKS = {total_ticks}', code)
+        code = re.sub(r'LIMIT\s*=\s*[\d.]+', f'LIMIT = {pos_limit}', code)
+
+        # 4. Rename the isolated class
         class_name = f"Trader_{product}"
         code = re.sub(r'class Trader\b\s*:', f'class {class_name}:', code)
 
         final_code += code.strip() + "\n\n"
         
-        # 4. Add module initialization to the master router
+        # 5. Add module initialization to the master router
         router_init += f"        self.modules['{product}'] = {class_name}()\n"
 
-    # 5. Build the Master Multiplexer
+    # 6. Build the Master Multiplexer
     master_router = router_init + """
     def run(self, state: TradingState) -> Tuple[Dict[str, List[Order]], int, str]:
         final_result = {}
@@ -106,6 +120,7 @@ def main():
         f.write(final_code)
 
     print(f"\n[trader_gen] Multi-Strat trader created")
+    print(f"[trader_gen] TOTAL_TICKS = {total_ticks} (injected from sweep)")
     print(f"[trader_gen] Written: {output_path}")
 
 if __name__ == "__main__":

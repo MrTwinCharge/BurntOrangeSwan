@@ -18,6 +18,7 @@
 #include "strategies/spread_capture.hpp"
 #include "strategies/fair_value.hpp"
 #include "strategies/stat_arb.hpp"
+#include "strategies/universal_strat.hpp" 
 
 namespace fs = std::filesystem;
 
@@ -28,25 +29,54 @@ struct StrategyEntry {
 std::vector<StrategyEntry> build_registry(const std::string& active_symbol) {
     std::vector<StrategyEntry> reg;
 
+    // Sweeps across 5 dimensions: Threshold, Risk Aversion, Edge, Aggression, and Volatility Fade
+    reg.push_back({"universal", "trader_universal.py",
+        {
+            {"threshold", 0.10, 0.40, 0.10}, 
+            {"risk_aversion", 0.01, 0.16, 0.05}, 
+            {"maker_edge", 1, 4, 1},
+            {"taker_aggression", 0, 1, 1}, // 0 = Passive Maker, 1 = Aggressive Taker
+            {"max_spread", 10, 30, 5},
+            {"exit_behavior", 0, 1, 1}
+        },
+        [active_symbol](const std::vector<double>& p) -> Strategy* {
+            auto* s = new UniversalStrategy(); 
+            s->signal_threshold = p[0]; 
+            s->risk_aversion = p[1]; 
+            s->maker_edge = (int)p[2];
+            s->taker_aggression = (int)p[3];
+            s->max_spread_fade = (int)p[4];
+            s->exit_behavior = (int)p[5];
+            s->target_symbols = {active_symbol}; 
+            return s;
+        }});
+
     reg.push_back({"omni", "trader_obi.py",
         {{"threshold", 0.05, 0.50, 0.05}, {"order_size", 2, 20, 2}},
         [active_symbol](const std::vector<double>& p) -> Strategy* {
-            auto* s = new OmniImbalance(); s->default_threshold=p[0]; s->default_size=(int)p[1]; 
+            auto* s = new OmniImbalance(); 
+            s->signal_threshold = p[0];   // FIX: was default_threshold
+            s->default_size = (int)p[1]; 
             s->target_symbols = {active_symbol}; return s;
         }});
 
-    // AUGMENTED: Added continuous skew risk_aversion to the sweep grid
     reg.push_back({"mm", "trader_mm.py",
         {{"edge", 0, 5, 1}, {"order_size", 2, 20, 2}, {"risk_aversion", 0.01, 0.20, 0.02}},
         [active_symbol](const std::vector<double>& p) -> Strategy* {
-            auto* s = new MarketMaker(); s->default_edge=(int)p[0]; s->default_order_size=(int)p[1]; 
-            s->risk_aversion=p[2]; s->target_symbols = {active_symbol}; return s;
+            auto* s = new MarketMaker(); 
+            s->base_edge = (int)p[0];
+            s->default_order_size = (int)p[1]; 
+            s->risk_aversion = p[2]; 
+            s->target_symbols = {active_symbol}; return s;
         }});
 
     reg.push_back({"mr", "trader_mr.py",
         {{"ema_alpha", 0.02, 0.20, 0.02}, {"z_threshold", 0.5, 3.0, 0.5}, {"order_size", 2, 10, 2}},
         [active_symbol](const std::vector<double>& p) -> Strategy* {
-            auto* s = new MeanReversion(); s->ema_alpha=p[0]; s->z_threshold=p[1]; s->order_size=(int)p[2]; 
+            auto* s = new MeanReversion(); 
+            s->ema_alpha = p[0]; 
+            s->z_entry = p[1];                    // FIX: was z_threshold
+            s->order_size = (int)p[2]; 
             s->target_symbols = {active_symbol}; return s;
         }});
 
@@ -83,6 +113,9 @@ void run_and_save(const std::string& strat_name, Strategy* strat,
     double& out_pnl, int& out_trades) {
 
     strat->init(symbols);
+    // FIX: Set total_ticks so strategies know session length for flattening
+    strat->total_ticks = (int)(end_tick - start_tick);
+    
     size_t num_symbols = symbols.size();
     
     std::vector<LimitOrderBook> lobs;
@@ -170,7 +203,7 @@ int main(int argc, char* argv[]) {
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         if (a == "--no-vis") vis = false; else if (a == "--no-gen") gen = false;
-        else if (a == "-h" || a == "--help") { std::cout << "Usage: ./sweep [omni|mm|mr|sc|fv|sa|all]\n"; return 0; }
+        else if (a == "-h" || a == "--help") { std::cout << "Usage: ./sweep [omni|mm|mr|sc|fv|sa|universal|all]\n"; return 0; }
         else target = a;
     }
 
@@ -264,8 +297,6 @@ int main(int argc, char* argv[]) {
         std::cout << "║ " << std::left << std::setw(10) << x.symbol << " : " << std::setw(6) << x.strat_name
                   << " PnL: " << std::right << std::setw(8) << std::fixed << std::setprecision(2) << x.r.total_pnl
                   << "  Trades: " << std::setw(5) << x.r.total_trades << "  [";
-        
-        // FIXED: Misleading indentation warning resolved here
         for (size_t j = 0; j < x.p.size(); j++) {
             if (j > 0) {
                 std::cout << ",";
@@ -278,14 +309,18 @@ int main(int argc, char* argv[]) {
               << "║ TOTAL COMBINED OOS PNL: " << std::right << std::setw(16) << std::fixed << std::setprecision(2) << total_portfolio_oos_pnl << "                   ║\n"
               << "╚══════════════════════════════════════════════════════════════════╝\n\n";
 
-    // AUGMENTED: Export the Frankenstein Routing table for the Python code generator
+    // Export the Frankenstein Routing table for the Python code generator
     std::ofstream json_out("../results/optimal_routing.json");
     if (json_out.is_open()) {
         json_out << "{\n";
+        json_out << "  \"_meta\": {\"total_ticks\": " << total_ticks << "},\n";
         for (size_t i = 0; i < master_portfolio.size(); ++i) {
             const auto& x = master_portfolio[i];
+            int pos_limit = get_position_limit(x.symbol);
             json_out << "  \"" << x.symbol << "\": {\"strategy\": \"" << x.strat_name 
-                     << "\", \"template\": \"" << x.tmpl << "\", \"params\": {";
+                     << "\", \"template\": \"" << x.tmpl 
+                     << "\", \"position_limit\": " << pos_limit
+                     << ", \"params\": {";
             for (size_t j = 0; j < x.p.size(); ++j) {
                 json_out << "\"" << x.p[j].name << "\": " << x.r.params[j];
                 if (j < x.p.size() - 1) json_out << ", ";

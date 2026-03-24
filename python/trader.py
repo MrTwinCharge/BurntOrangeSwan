@@ -5,9 +5,9 @@ import math
 class Trader_EMERALDS:
     EDGE = 5
     ORDER_SIZE = 14
-    RISK_AVERSION = 0.15
+    RISK_AVERSION = 0.01
     LIMIT = 50
-    TOTAL_TICKS = 2000
+    TOTAL_TICKS = 10000
     FLATTEN_PCT = 0.90
 
     def __init__(self):
@@ -83,10 +83,10 @@ class Trader_EMERALDS:
 
 class Trader_TOMATOES:
     EDGE = 5
-    ORDER_SIZE = 14
+    ORDER_SIZE = 6
     RISK_AVERSION = 0.01
     LIMIT = 50
-    TOTAL_TICKS = 2000
+    TOTAL_TICKS = 10000
     FLATTEN_PCT = 0.90
 
     def __init__(self):
